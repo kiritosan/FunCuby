@@ -13,20 +13,42 @@ FunCuby is an unofficial open-source web tool for CubyFun easyplay 1s that conne
 - Device: Bluetooth connection, live key display and first-key calibration
 - Test: Send MIDI messages and raw HEX packets to test device responses
 - Play: Import MIDI files, select tracks, adjust speed and play
+- Transcribe: Turn a local audio file into pocket-piano practice scores, entirely on-device
 - Practice: Follow-along mode, rhythm game scoring, loops and latency calibration
 - Logs: View, import and export communication logs
 
 ### Usage
 
-Install Node.js (the project uses Node.js 26), then run in the project directory:
+Install Node.js (the project uses Node.js 26), then in the project directory run `npm ci` followed by:
 
 ```sh
 npm start
 ```
 
+`npm start` first builds the local transcription runtime (`npm run build:transcription`).
+
 Open <http://localhost:5173> and connect your keyboard on the Device page.
 
 For Bluetooth connections, use a browser that supports Web Bluetooth, such as Chrome, and open the site over localhost or HTTPS.
+
+**Transcribe** turns an audio file on this device into a practice score. Pick a file (MP3/WAV and other browser-decodable formats, up to 50 MB and 10 minutes) — the whole source is used by default, or trim a 1–600 s clip manually — and the app detects notes locally with Spotify Basic Pitch in a web worker — nothing is uploaded. Long clips take longer and can be cancelled at any time. Choose one of four arrangements (starter, melody, fuller, original), audition the result, download MIDI, or send it straight to Practice. BPM, transpose, beat offset and pitch range are editable assumptions, not detected values; the picker keeps the highest-pitched voice as a heuristic and is not reliable vocal separation, so complex mixes may need a cleaner source or manual checking.
+
+You can also paste a public Bilibili or YouTube video link and click **Fetch audio**. The local server downloads and normalizes the audio with yt-dlp + ffmpeg, then hands it to the same file pipeline — transcription still only runs when you click Start. This needs internet access, the local `npm start` server, and yt-dlp plus ffmpeg/ffprobe (see [docs/url-import.md](docs/url-import.md) for setup). It uses no cookies, no login, and no DRM or access-control bypass — only fetch content you are allowed to download.
+
+The last successfully imported song, completed mode captures and editing settings
+are saved automatically in browser IndexedDB. Wait for **Saved locally**, then
+refresh or reopen the browser/server to continue without fetching or inference.
+A new song replaces the previous save; deletion requires confirmation. Use the
+same browser and address (including port); clearing site data, private windows
+or browser eviction can remove saved work. Keep important MIDI backups. See
+[melody quality and local storage](docs/melody-quality.md).
+
+The melody review panel compares the same short phrase in the source and piano,
+supports looping and manual note/timing/split/merge edits, and retains the
+unedited recognition separately. Edits update all difficulty versions and save
+locally. Review exports are unverified drafts, not certified scores.
+
+Transcription uses [Spotify Basic Pitch](https://github.com/spotify/basic-pitch-ts) and [TensorFlow.js](https://github.com/tensorflow/tfjs), bundled locally under `vendor/` (gitignored, rebuilt by `npm start`). Both are Apache-2.0; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Personal use does not remove license obligations. The job/worker/diagnostics design is documented in [docs/transcription-architecture.md](docs/transcription-architecture.md).
 
 Licensed under the [MIT License](LICENSE).
 
@@ -43,20 +65,40 @@ FunCuby 是 CubyFun easyplay 1s 的非官方开源网页工具，通过蓝牙连
 - 设备：蓝牙连接、实时按键显示、首键校准
 - 测试：发送 MIDI 消息和原始 HEX 报文，测试设备响应
 - 演奏：导入 MIDI 文件，选择音轨、调整速度并播放
+- 扒谱：把本机音频文件转成口袋钢琴练习谱，完全本地运行
 - 练习：跟练、音游评分、循环练习和延迟校准
 - 日志：查看、导入和导出通信记录
 
 ### 使用
 
-安装 Node.js（项目使用 Node.js 26），在项目目录运行：
+安装 Node.js（项目使用 Node.js 26），在项目目录先运行 `npm ci`，再运行：
 
 ```sh
 npm start
 ```
 
+`npm start` 会先构建本地转写运行时（`npm run build:transcription`）。
+
 打开 <http://localhost:5173>，在 设备 页面连接键盘。
 
 蓝牙连接请使用支持蓝牙的浏览器，如 chrome ，通过 localhost 或 HTTPS 访问。
+
+**扒谱**把本机音频文件转成练习谱。选择文件（MP3/WAV 等浏览器可解码格式，最大 50 MB、10 分钟）——默认使用整首音频，也可手动裁剪 1–600 秒片段——应用在 Web Worker 中用 Spotify Basic Pitch 本地识别音符——不上传任何内容。长片段耗时更长，可随时取消。可选入门、基础、进阶、原始四种改编，试听结果、下载 MIDI，或直接送去练习。BPM、移调、节拍原点和音高范围都是可修改的假设值，并非自动识别；系统取最高声部作为启发式旋律，并非可靠的人声分离，复杂混音可能需要更干净的音源或人工检查。
+
+也可以在「扒谱」中粘贴公开的 B 站或 YouTube 视频链接并点击「获取音频」。本地服务器会通过 yt-dlp + ffmpeg 下载并规范化音频，然后走与文件导入相同的流程——识别仍需手动点击开始。该功能需要联网、本地 `npm start` 服务，以及 yt-dlp 和 ffmpeg/ffprobe（安装方法见 [docs/url-import.md](docs/url-import.md)）。不使用 Cookie、登录，也不绕过 DRM 或访问控制——请仅下载你有权获取的内容。
+
+扒谱页会自动保存最近一次成功导入的音频、各转写模式结果和编辑设置。
+看到“已保存到本机”后，刷新页面或重启服务、浏览器，可以继续使用，
+无需重新获取音频或重新识别。新歌曲会替换上一次保存；删除按钮需要确认。
+请固定使用同一浏览器和地址（建议 `http://127.0.0.1:5173/#transcribe`）。
+无痕模式、清理站点数据或浏览器回收空间可能删除保存，重要 MIDI 仍建议备份。
+详情见[旋律质量与本机保存说明](docs/melody-quality.md)。
+
+「旋律核对与修订」可在同一短句间交替试听原曲和钢琴、循环核对，并修改音高、
+时值、拆分或合并同音。修订会自动更新各难度并保存在本机，未经编辑的识别稿
+单独保留。核对导出仍标为未验证草稿，不会自动冒充可靠定稿。
+
+转写功能使用 [Spotify Basic Pitch](https://github.com/spotify/basic-pitch-ts) 与 [TensorFlow.js](https://github.com/tensorflow/tfjs)，打包在本地 `vendor/` 目录（已被 gitignore，由 `npm start` 重新生成）。两者均为 Apache-2.0 协议，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。个人使用并不免除许可义务。任务/Worker/诊断设计见 [docs/transcription-architecture.md](docs/transcription-architecture.md)。
 
 本项目采用 [MIT 协议](LICENSE)。
 

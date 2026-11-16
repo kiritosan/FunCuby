@@ -1,0 +1,428 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { mkdir, stat, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import process from "node:process";
+
+// Engineering acceptance check, not an accuracy/performance benchmark.
+// Observe the actual UI/worker path through a complete 219-second transcription.
+const BASE_URL = process.env.BASE_URL || "http://127.0.0.1:5173";
+const BROWSER =
+    process.env.BROWSER ||
+    "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
+const RUN_TIMEOUT_MS = 12 * 60 * 1000;
+const gpuEnabled = process.argv.includes("--gpu-enabled");
+const game = process.argv.includes("--game");
+const customClip = process.argv
+    .find((arg) => arg.startsWith("--clip="))
+    ?.slice(7);
+const seconds = Number(
+    process.argv.find((arg) => arg.startsWith("--seconds="))?.slice(10) || 219,
+);
+assert.ok(seconds > 0 && seconds <= 600);
+const sampleRate = game ? 44100 : 22050;
+const artifacts = resolve(".test-artifacts");
+const artifactName = game
+    ? "transcription-game-quality"
+    : customClip
+      ? "transcription-basic-quality"
+      : gpuEnabled
+        ? "transcription-gpu-enabled-cpu-default"
+        : "transcription-long-run";
+const reportPath = resolve(artifacts, `${artifactName}.json`);
+const fixture = customClip
+    ? resolve(customClip)
+    : resolve(artifacts, "clip219.wav");
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const report = {
+    schema: "funcuby-transcription-long-run-v1",
+    baseUrl: BASE_URL,
+    fixture: customClip || "clip219.wav",
+    seconds,
+    engine: game ? "game" : "basic-pitch",
+    browserFlags: ["--headless=new", ...(gpuEnabled ? [] : ["--disable-gpu"])],
+    events: [],
+    errors: [],
+    passed: false,
+};
+let browser, socket, send;
+
+await stat(fixture);
+await mkdir(artifacts, { recursive: true });
+assert.ok((await fetch(BASE_URL)).ok, "Start the local FunCuby server first");
+try {
+    browser = spawn(
+        BROWSER,
+        [
+            ...report.browserFlags,
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--remote-debugging-port=0",
+            "--lang=zh-CN",
+            "--autoplay-policy=no-user-gesture-required",
+            `--user-data-dir=${resolve(artifacts, `${artifactName}-profile`)}`,
+            "about:blank",
+        ],
+        { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] },
+    );
+    const debuggerUrl = await new Promise((resolve, reject) => {
+        let output = "";
+        const timer = setTimeout(
+            () => reject(new Error("Browser debugger startup timed out")),
+            20000,
+        );
+        browser.on("error", (error) => {
+            clearTimeout(timer);
+            reject(error);
+        });
+        browser.stderr.on("data", (data) => {
+            output += data;
+            const match = output.match(/DevTools listening on (ws:\/\/\S+)/);
+            if (match) {
+                clearTimeout(timer);
+                resolve(match[1]);
+            }
+        });
+    });
+    const port = new URL(debuggerUrl).port;
+    const tabs = await (
+        await fetch(`http://127.0.0.1:${port}/json/list`)
+    ).json();
+    const page = tabs.find((tab) => tab.type === "page");
+    assert.ok(page, "No diagnostic browser page was created");
+    socket = new WebSocket(page.webSocketDebuggerUrl);
+    await new Promise((resolve, reject) => {
+        socket.addEventListener("open", resolve, { once: true });
+        socket.addEventListener("error", reject, { once: true });
+    });
+    let sequence = 0;
+    const pending = new Map();
+    socket.addEventListener("message", ({ data }) => {
+        const event = JSON.parse(data);
+        if (event.id) {
+            const promise = pending.get(event.id);
+            if (!promise) return;
+            pending.delete(event.id);
+            event.error
+                ? promise.reject(new Error(JSON.stringify(event.error)))
+                : promise.resolve(event.result);
+        } else if (event.method === "Runtime.exceptionThrown") {
+            report.errors.push(event.params.exceptionDetails);
+        } else if (
+            event.method === "Runtime.consoleAPICalled" &&
+            event.params.type === "error"
+        ) {
+            report.errors.push({
+                consoleError: event.params.args
+                    .map((arg) => arg.value ?? arg.description ?? "")
+                    .join(" "),
+            });
+        }
+    });
+    send = (method, params = {}) =>
+        new Promise((resolve, reject) => {
+            const id = ++sequence;
+            const timer = setTimeout(() => {
+                pending.delete(id);
+                reject(new Error(`CDP ${method} timed out`));
+            }, 30000);
+            pending.set(id, {
+                resolve: (result) => {
+                    clearTimeout(timer);
+                    resolve(result);
+                },
+                reject: (error) => {
+                    clearTimeout(timer);
+                    reject(error);
+                },
+            });
+            socket.send(JSON.stringify({ id, method, params }));
+        });
+    const evaluate = async (expression) => {
+        const result = await send("Runtime.evaluate", {
+            expression,
+            awaitPromise: true,
+            returnByValue: true,
+        });
+        if (result.exceptionDetails)
+            throw new Error(JSON.stringify(result.exceptionDetails));
+        return result.result.value;
+    };
+    const until = async (expression, timeoutMs = 20000) => {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            if (await evaluate(expression)) return true;
+            await wait(100);
+        }
+        return false;
+    };
+    await send("Runtime.enable");
+    await send("Page.enable");
+    await send("Page.navigate", {
+        url: new URL("/#transcribe", BASE_URL).href,
+    });
+    assert.ok(
+        await until(
+            "document.querySelectorAll('#transcribe-levels .transcribe-level').length === 4",
+        ),
+        "Transcription page did not initialize",
+    );
+    if (gpuEnabled) {
+        report.gpuProbe = await evaluate(`new Promise((resolve) => {
+            const worker = new Worker("/tests/e2e/backend-probe-worker.js", {
+                type: "module",
+            });
+            const timer = setTimeout(() => {
+                worker.terminate();
+                resolve({ webglReady: false, timedOut: true });
+            }, 20000);
+            worker.onmessage = ({data}) => {
+                clearTimeout(timer);
+                worker.terminate();
+                resolve(data);
+            };
+            worker.onerror = (event) => {
+                clearTimeout(timer);
+                worker.terminate();
+                resolve({ webglReady: false, error: event.message });
+            };
+            worker.postMessage({});
+        })`);
+        console.log("GPU capability:", JSON.stringify(report.gpuProbe));
+        assert.equal(
+            report.gpuProbe.webglReady,
+            true,
+            "This acceptance variant needs a WebGL-capable worker",
+        );
+    }
+    if (game) {
+        assert.ok(
+            await until(
+                "!document.getElementById('transcribe-engine-game').disabled",
+            ),
+            "Local GAME environment is unavailable",
+        );
+        await evaluate(`(() => {
+            const engine = document.getElementById("transcribe-engine");
+            engine.value = "game";
+            engine.dispatchEvent(new Event("change"));
+            const language = document.getElementById("transcribe-language");
+            language.value = "zh";
+            language.dispatchEvent(new Event("change"));
+        })()`);
+    }
+    await evaluate(`(() => {
+        const NativeWorker = window.Worker;
+        window.__longRunEvents = [];
+        window.__longRunSamples = [];
+        window.__longRunStart = performance.now();
+        window.Worker = class extends NativeWorker {
+            constructor(...args) {
+                super(...args);
+                this.addEventListener("message", ({data}) => {
+                    if (data?.type === "result") window.__qualityNotes = data.notes;
+                    window.__longRunEvents.push({
+                        elapsedMs: performance.now() - window.__longRunStart,
+                        version: data?.version,
+                        jobId: data?.jobId,
+                        type: data?.type,
+                        stage: data?.stage,
+                        backend: data?.backend,
+                        progress: data?.progress,
+                        completedWindows: data?.completedWindows,
+                        totalWindows: data?.totalWindows,
+                        tensorCount: data?.tensorCount,
+                        noteCount: Array.isArray(data?.notes)
+                            ? data.notes.length
+                            : undefined,
+                        error: data?.error,
+                    });
+                    if (data?.type === "result" ||
+                        (data?.type === "status" &&
+                         (data.completedWindows === 1 ||
+                          (data.completedWindows > 0 &&
+                           data.completedWindows % 20 === 0))))
+                        console.log("inference-observed", JSON.stringify({
+                            backend: data.backend,
+                            completed: data.completedWindows,
+                            total: data.totalWindows,
+                            type: data.type,
+                        }));
+                });
+            }
+            postMessage(message, transfer) {
+                if (message?.samples)
+                    window.__longRunSamples.push(message.samples.length);
+                return super.postMessage(message, transfer);
+            }
+        };
+    })()`);
+    const { root } = await send("DOM.getDocument");
+    const { nodeId } = await send("DOM.querySelector", {
+        nodeId: root.nodeId,
+        selector: "#transcribe-file",
+    });
+    await send("DOM.setFileInputFiles", { nodeId, files: [fixture] });
+    assert.ok(
+        await until("!document.getElementById('transcribe-clip').hidden"),
+        "Long audio did not decode",
+    );
+    await evaluate(`(() => {
+        const length = document.getElementById("transcribe-length");
+        length.value = "${seconds}";
+        length.dispatchEvent(new Event("change"));
+        window.__longRunStart = performance.now();
+        document.getElementById("transcribe-run").click();
+    })()`);
+    const deadline = Date.now() + RUN_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+        report.events = await evaluate("window.__longRunEvents");
+        report.ui = await evaluate(`({
+            status: document.getElementById("transcribe-status").textContent,
+            error: document.getElementById("transcribe-error").hidden
+                ? ""
+                : document.getElementById("transcribe-error").textContent,
+            resultsHidden: document.getElementById("transcribe-results").hidden,
+            runDisabled: document.getElementById("transcribe-run").disabled,
+        })`);
+        if (
+            report.events.some(
+                (event) =>
+                    event.type === "status" &&
+                    event.stage === "transcribing" &&
+                    event.completedWindows > 0,
+            ) &&
+            !report.firstWindowObserved
+        ) {
+            report.firstWindowObserved = true;
+            console.log(
+                "First completed CPU window:",
+                JSON.stringify(
+                    report.events.find(
+                        (event) =>
+                            event.stage === "transcribing" &&
+                            event.completedWindows > 0,
+                    ),
+                ),
+            );
+        }
+        if (
+            report.ui.error ||
+            report.events.some(
+                (event) => event.type === "result" || event.type === "error",
+            )
+        )
+            break;
+        await wait(1000);
+    }
+    report.postedSamples = await evaluate("window.__longRunSamples");
+    const completed = report.events.filter(
+        (event) =>
+            event.type === "status" &&
+            event.stage === "transcribing" &&
+            event.completedWindows > 0,
+    );
+    const terminal = report.events.find((event) => event.type === "result");
+    assert.equal(report.ui.error, "", "Transcription UI reported an error");
+    assert.ok(
+        terminal,
+        "Long transcription did not complete within the test budget",
+    );
+    assert.ok(
+        completed.length > 1,
+        "No sustained window progress was observed",
+    );
+    assert.equal(completed.length, completed.at(-1).totalWindows);
+    completed.forEach((event, index) => {
+        assert.equal(event.backend, "cpu", "Unvalidated GPU was auto-selected");
+        assert.equal(event.completedWindows, index + 1);
+        assert.equal(event.progress, (index + 1) / event.totalWindows);
+    });
+    assert.equal(completed.at(-1).progress, 1);
+    if (!game)
+        assert.equal(
+            new Set(completed.map((event) => event.tensorCount)).size,
+            1,
+            "Live tensor count grew across model windows",
+        );
+    if (!game)
+        assert.ok(
+            completed.every((event) => Number.isSafeInteger(event.tensorCount)),
+            "Window tensor telemetry was missing",
+        );
+    if (!game)
+        assert.equal(
+            terminal.tensorCount,
+            0,
+            "Completed worker retained tensors",
+        );
+    assert.ok(terminal.noteCount > 0, "Synthetic long input produced no notes");
+    assert.equal(report.ui.resultsHidden, false);
+    assert.equal(report.ui.runDisabled, false);
+    assert.deepEqual(report.postedSamples, [seconds * sampleRate]);
+    assert.deepEqual(report.errors, []);
+    report.inferencePassed = true;
+    report.tensorCountKind = game
+        ? "Not applicable to ONNX CPU"
+        : "Logical TensorFlow tensors, not physical RAM";
+    if (customClip) {
+        await writeFile(
+            resolve(artifacts, `${artifactName}-notes.json`),
+            JSON.stringify(await evaluate("window.__qualityNotes"), null, 2),
+        );
+    }
+    if (game) {
+        const before = report.events.length;
+        await evaluate(`(() => {
+            const engine = document.getElementById("transcribe-engine");
+            engine.value = "basic-pitch"; engine.dispatchEvent(new Event("change"));
+            engine.value = "game"; engine.dispatchEvent(new Event("change"));
+        })()`);
+        assert.equal(await evaluate("window.__longRunEvents.length"), before);
+        assert.equal(
+            await evaluate(
+                "document.getElementById('transcribe-results').hidden",
+            ),
+            false,
+        );
+    }
+    try {
+        await writeFile(
+            resolve(artifacts, `${artifactName}.png`),
+            Buffer.from(
+                (
+                    await send("Page.captureScreenshot", {
+                        format: "png",
+                        captureBeyondViewport: true,
+                    })
+                ).data,
+                "base64",
+            ),
+        );
+    } catch (error) {
+        report.screenshotFailure = String(error?.message ?? error);
+        console.warn(
+            "Screenshot artifact unavailable:",
+            report.screenshotFailure,
+        );
+    }
+    report.passed = true;
+    console.log(
+        `PASS: complete ${seconds} s ${report.engine} UI-to-model-to-score transcription`,
+    );
+    console.log("PASS: every model window advanced actual progress");
+    console.log(
+        game
+            ? "PASS: mode switch restores the saved capture without inference"
+            : "PASS: stable live tensors per window; zero at terminal disposal",
+    );
+} catch (error) {
+    report.failure = String(error?.stack ?? error);
+    throw error;
+} finally {
+    await writeFile(reportPath, JSON.stringify(report, null, 2));
+    if (socket?.readyState === WebSocket.OPEN && send)
+        await Promise.race([send("Browser.close").catch(() => {}), wait(3000)]);
+    socket?.close();
+    if (browser && browser.exitCode === null) browser.kill();
+}

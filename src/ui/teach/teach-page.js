@@ -824,11 +824,14 @@ export function initTeachPage({
 
     // ---- file and settings -------------------------------------------------------------------
 
-    async function loadFile() {
-        if (locked()) return;
-        const file = byId("teach-file").files[0],
-            request = ++fileRequest;
-        if (!file) return;
+    async function loadFile(file) {
+        if (locked()) {
+            if (file === undefined) return null;
+            throw new AppError("errors.teachingBusy");
+        }
+        const request = ++fileRequest;
+        file ??= byId("teach-file").files[0];
+        if (!file) return null;
         loading = true;
         song = null;
         mapping = false;
@@ -840,7 +843,7 @@ export function initTeachPage({
         hideResults();
         try {
             const parsed = await readMidiFile(file);
-            if (request !== fileRequest) return;
+            if (request !== fileRequest) return null;
             song = parsed;
             fileName = file.name;
             const first = renderTrackPicker(song.tracks);
@@ -861,6 +864,7 @@ export function initTeachPage({
                 t(first ? "teach.feedback.ready" : "teach.feedback.noNotes"),
                 Infinity,
             );
+            return song;
         } catch (error) {
             byId("teach-summary").textContent = t("teach.summary.failed");
             throw error;
@@ -870,6 +874,24 @@ export function initTeachPage({
                 controls();
             }
         }
+    }
+
+    /**
+     * Public handoff for generated MIDI (e.g. the transcribe tab). Loads the file,
+     * switches to follow mode and refreshes controls without starting a session.
+     * Refuses while practising, calibrating, loading or playing so nothing is disturbed.
+     */
+    async function loadPracticeFile(file) {
+        if (!(file instanceof Blob)) throw new AppError("errors.uploadFirst");
+        if (locked() || loading) throw new AppError("errors.teachingBusy");
+        if (player.state !== "idle") throw new AppError("errors.stopPlayback");
+        const loaded = await loadFile(file);
+        if (!loaded) return false;
+        byId("teach-mode").value = "follow";
+        preferences.set("teach:mode", "follow");
+        discardResults();
+        controls();
+        return true;
     }
 
     async function toggleMetronome() {
@@ -903,7 +925,10 @@ export function initTeachPage({
     restoreSettings();
     mappingChanged();
 
-    byId("teach-file").addEventListener("change", report(loadFile));
+    byId("teach-file").addEventListener(
+        "change",
+        report(() => loadFile()),
+    );
     byId("teach-start").addEventListener(
         "click",
         report(() => begin(false)),
@@ -1009,6 +1034,7 @@ export function initTeachPage({
         receive,
         mappingChanged,
         pause,
+        loadPracticeFile,
         get busy() {
             return active();
         },

@@ -7,16 +7,28 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
+    "prestart": "npm run build:transcription && npm run setup:piano",
+    "setup:piano": "node scripts/setup-piano.mjs",
+    "setup:game": "node scripts/setup-game.mjs",
+    "build:transcription": "node scripts/build-transcription.mjs",
     "test": "node --test \"tests/unit/*.test.js\"",
     "test:e2e": "node tests/e2e/smoke.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test:e2e:url": "node tests/e2e/url-import.mjs",
+    "test:e2e:storage": "node tests/e2e/transcription-storage.mjs",
+    "test:e2e:melody": "node tests/e2e/melody-editor.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
+    "esbuild": "^0.25.12",
     "eslint": "^10.0.0",
     "globals": "^17.0.0",
     "prettier": "^3.9.0"
+  },
+  "dependencies": {
+    "@spotify/basic-pitch": "^1.0.1",
+    "@tensorflow/tfjs": "^3.21.0"
   }
 }

@@ -1,0 +1,3 @@
+# Optional local CPU inference. Install in a virtual environment, not globally.
+numpy==2.2.0
+onnxruntime==1.30.0

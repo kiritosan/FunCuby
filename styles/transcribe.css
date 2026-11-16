@@ -1,0 +1,170 @@
+/* Transcribe tab: arrangement cards, numbered preview, clip controls. */
+
+.transcribe-levels {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.transcribe-level {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    white-space: normal;
+    min-width: 0;
+    cursor: pointer;
+}
+
+.transcribe-level[aria-pressed="true"] {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.transcribe-level-name {
+    font-weight: 600;
+}
+
+.transcribe-level-desc {
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+
+.transcribe-level-count {
+    font-size: 0.8rem;
+}
+
+.transcribe-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    align-items: center;
+    margin: 0.5rem 0;
+    min-height: 1.5rem;
+}
+
+/* Three rows per token: octave dots above, degree, octave dots below. */
+.transcribe-note {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0.15rem 0.35rem;
+    border: 1px solid var(--line);
+    border-radius: 0.3rem;
+    background: var(--surface-sunken);
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    line-height: 1.15;
+}
+
+.transcribe-note-dots {
+    color: var(--muted);
+    font-size: 0.6rem;
+    min-height: 0.7em;
+    letter-spacing: 0.05em;
+}
+
+#transcribe-source {
+    max-width: 100%;
+}
+
+.transcribe-audition-settings {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.5rem;
+    margin-top: 0.75rem;
+}
+
+.transcribe-audition-settings label {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.transcribe-audition-settings input[type="range"] {
+    width: 8rem;
+}
+
+.transcribe-audition-settings select {
+    max-width: 100%;
+}
+
+#transcribe-audition-volume-value {
+    min-width: 3rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.transcribe-url-row input[type="url"] {
+    flex: 1 1 16rem;
+    width: auto;
+}
+
+.transcribe-url-row #transcribe-fetch-status {
+    flex: 1 1 8rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.transcribe-notes {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
+
+.transcribe-notes p {
+    margin: 0.4rem 0 0;
+}
+
+#transcribe-advanced {
+    margin: 0.5rem 0;
+}
+
+#transcribe-diagnostics {
+    min-height: 0;
+    margin: 2px 0 0;
+    padding: 3px 10px;
+    font-size: 11px;
+}
+
+.melody-editor {
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    margin: 0.75rem 0;
+    background: var(--surface-sunken);
+}
+
+.melody-editor h3 {
+    margin: 0 0 0.4rem;
+}
+
+.melody-editor-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+    gap: 0.35rem;
+    max-height: 17rem;
+    overflow-y: auto;
+    margin: 0.6rem 0;
+}
+
+.melody-editor-list button {
+    white-space: normal;
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+}
+
+.melody-editor-list button[aria-pressed="true"] {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent) inset;
+}

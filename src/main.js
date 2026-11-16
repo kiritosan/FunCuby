@@ -14,8 +14,9 @@ import { initSendPage } from "./ui/send/send-page.js";
 import { initLocalePicker } from "./ui/locale-picker.js";
 import { initTeachPage } from "./ui/teach/teach-page.js";
 import { initThemePicker } from "./ui/theme-picker.js";
+import { initTranscribePage } from "./ui/transcribe/transcribe-page.js";
 
-const TABS = ["device", "send", "play", "teach", "logs", "about"];
+const TABS = ["device", "send", "play", "transcribe", "teach", "logs", "about"];
 
 async function initialize() {
     initLocalePicker(preferences);
@@ -48,7 +49,8 @@ async function initialize() {
         book.record({ ...detail, direction: "TX", txId: id, events: [] });
     });
 
-    let teach = null;
+    let teach = null,
+        transcribe = null;
     const device = initDevicePage({
         transport,
         book,
@@ -56,7 +58,10 @@ async function initialize() {
         notice,
         run,
         onNote: (event, receivedAt) => teach?.receive(event, receivedAt),
-        onMappingChange: () => teach?.mappingChanged(),
+        onMappingChange: () => {
+            teach?.mappingChanged();
+            transcribe?.mappingChanged();
+        },
     });
     const logs = initLogsPage({ book, notice, run });
     const send = initSendPage({
@@ -85,10 +90,16 @@ async function initialize() {
         setOffset: device.setOffset,
         onStateChange: play.refresh,
     });
+    transcribe = initTranscribePage({
+        notice,
+        getOffset: device.getOffset,
+        loadPracticeFile: (file) => teach.loadPracticeFile(file),
+    });
 
     function navigate(tab) {
         if (!TABS.includes(tab)) tab = "device";
         if (tab !== "teach") teach.pause(t("teach.status.leftPage"));
+        if (tab !== "transcribe") transcribe.leave();
         for (const node of document.querySelectorAll("[data-tab]")) {
             const selected = node.dataset.tab === tab;
             node.classList.toggle("selected", selected);
