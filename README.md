@@ -31,9 +31,11 @@ Open <http://localhost:5173> and connect your keyboard on the Device page.
 
 For Bluetooth connections, use a browser that supports Web Bluetooth, such as Chrome, and open the site over localhost or HTTPS.
 
-**Transcribe** turns a local audio file into a practice score. Import MP3, WAV or another browser-decodable format (up to 50 MB and 10 minutes), then use the whole source or trim a 1–600 s clip. Basic Pitch is the default browser CPU mode. The local Node server also supports CPU-only GAME for singing and UVR vocal separation followed by GAME for mixed songs. Both modes require Python and model setup. See [local model setup](docs/melody-quality.md#optional-local-game-and-vocal-separation).
+**Transcribe** turns a local audio file into a practice score. Import MP3, WAV or another browser-decodable format (up to 50 MB and 10 minutes), then use the whole source or trim a 1–600 s clip. Use Basic Pitch for instruments, direct GAME for clear lead vocals, or UVR + GAME when the backing track masks the singer. The page remembers your mode. On first use it selects direct GAME when available and Basic Pitch otherwise. The two GAME modes require Python and model setup. See [local model setup](docs/melody-quality.md#optional-local-game-and-vocal-separation).
 
 After transcription, **Auto Tempo + Main-Key Fit** estimates BPM and beat origin and suggests a transpose for the keyboard's main keys. **Original Key** sets transpose to zero. You can edit these settings, audition four arrangement levels, download MIDI, or open a score in Practice. Inference runs entirely on your device and can be cancelled.
+
+The progress panel shows preparation, model loading, completed processing windows and note extraction. UVR + GAME shows separation and transcription independently. When UVR finishes, you can play or download the isolated stereo WAV while GAME continues. The vocal preview is cleared on reload.
 
 You can also paste a public Bilibili or YouTube video link and click **Fetch audio**. The local server downloads and normalizes the audio with yt-dlp + ffmpeg, then hands it to the same file pipeline — transcription still only runs when you click Start. This needs internet access, the local `npm start` server, and yt-dlp plus ffmpeg/ffprobe (see [docs/url-import.md](docs/url-import.md) for setup). It uses no cookies, no login, and no DRM or access-control bypass — only fetch content you are allowed to download.
 
@@ -85,9 +87,11 @@ npm start
 
 蓝牙连接请使用支持蓝牙的浏览器，如 chrome ，通过 localhost 或 HTTPS 访问。
 
-**扒谱**把本机音频文件转成练习谱。支持 MP3、WAV 等浏览器可解码的格式，最大 50 MB、10 分钟。可以使用整首音频，也可以裁剪 1–600 秒片段。默认通过浏览器 CPU 运行 Basic Pitch。用本地 Node 服务运行时，也可以选 GAME 直扒人声，或先用 UVR 分离人声再交给 GAME，适合伴奏较强的歌曲。两个模式都需要安装 Python 依赖和模型。见[本机模型安装说明](docs/melody-quality.md#optional-local-game-and-vocal-separation)。
+**扒谱**把本机音频文件转成练习谱。支持 MP3、WAV 等浏览器可解码的格式，最大 50 MB、10 分钟。可以使用整首音频，也可以裁剪 1–600 秒片段。钢琴、吉他等器乐可用浏览器 Basic Pitch，清晰人声优先用 GAME 直扒，伴奏盖住主唱时可用 UVR 分离人声后再转写。页面会记住选用的模式。首次使用时，GAME 就绪便选直扒，否则使用浏览器模式。两个 GAME 模式都需要安装 Python 依赖和模型。见[本机模型安装说明](docs/melody-quality.md#optional-local-game-and-vocal-separation)。
 
 转写完成后，可用「自动节拍 + 全大键适配」估算 BPM、节拍原点和适合大键的移调量。「还原原调」将移调设回 0。你也可以手动调整参数，试听入门、基础、进阶、原始四档谱，下载 MIDI 或直接跟练。推理全程在本机运行，可随时取消。
+
+进度面板显示音频准备、模型加载、已完成窗口和音符整理。「本机精扒」分别显示 UVR 分离和 GAME 转写。分离完成后可在转写期间试听或下载双声道人声 WAV。刷新页面会清除试听，下载的 WAV 可单独保留。
 
 也可以在「扒谱」中粘贴公开的 B 站或 YouTube 视频链接并点击「获取音频」。本地服务器会通过 yt-dlp + ffmpeg 下载并规范化音频，然后走与文件导入相同的流程——识别仍需手动点击开始。该功能需要联网、本地 `npm start` 服务，以及 yt-dlp 和 ffmpeg/ffprobe（安装方法见 [docs/url-import.md](docs/url-import.md)）。不使用 Cookie、登录，也不绕过 DRM 或访问控制——请仅下载你有权获取的内容。
 

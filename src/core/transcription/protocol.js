@@ -15,6 +15,7 @@ const STAGES = new Set([
     "loading",
     "warming",
     "separating",
+    "loading-game",
     "transcribing",
     "extracting",
 ]);
@@ -164,28 +165,22 @@ export function encodeStart({
     });
 }
 
-export function encodeStatus({
-    jobId,
-    stage,
-    backend,
-    completedWindows,
-    totalWindows,
-    progress,
-    tensorCount,
-}) {
-    const fields = { stage: checkStage(stage) };
-    if (backend !== undefined) fields.backend = checkBackend(backend);
-    if (totalWindows !== undefined)
-        fields.totalWindows = checkTotalWindows(totalWindows);
-    if (completedWindows !== undefined)
-        fields.completedWindows = checkCompletedWindows(
-            completedWindows,
-            fields.totalWindows,
-        );
-    if (progress !== undefined) fields.progress = checkProgress(progress);
-    if (tensorCount !== undefined)
-        fields.tensorCount = checkTensorCount(tensorCount);
-    return envelope(jobId, "status", fields);
+export function encodeStatus({ jobId, ...data }) {
+    return envelope(jobId, "status", statusFields(data));
+}
+
+export const MAX_VOCAL_BYTES = 44100 * MAX_AUDIO_SECONDS * 4 + 44;
+
+export function encodeVocalStem({ jobId, blob }) {
+    if (
+        blob !== null &&
+        (!(blob instanceof Blob) ||
+            blob.type !== "audio/wav" ||
+            blob.size <= 44 ||
+            blob.size > MAX_VOCAL_BYTES)
+    )
+        throw protocolError("Invalid vocal audio");
+    return envelope(jobId, "vocal-stem", { blob });
 }
 
 export function encodeResult({ jobId, notes, tensorCount }) {
@@ -230,6 +225,12 @@ function statusFields(data) {
     if (data.backend !== undefined) fields.backend = checkBackend(data.backend);
     if (data.totalWindows !== undefined)
         fields.totalWindows = checkTotalWindows(data.totalWindows);
+    if (data.separationWindows !== undefined) {
+        const count = checkTotalWindows(data.separationWindows);
+        if (fields.totalWindows === undefined || count >= fields.totalWindows)
+            throw protocolError("Invalid separation window total");
+        fields.separationWindows = count;
+    }
     if (data.completedWindows !== undefined)
         fields.completedWindows = checkCompletedWindows(
             data.completedWindows,
@@ -257,6 +258,8 @@ export function decodeEvent(data, jobId) {
         throw protocolError(`Unsupported protocol version`);
     if (data.type === "status")
         return { type: "status", ...statusFields(data) };
+    if (data.type === "vocal-stem")
+        return { type: "vocal-stem", blob: encodeVocalStem(data).blob };
     if (data.type === "result") {
         const fields = { notes: checkNotes(data.notes) };
         if (data.tensorCount !== undefined)

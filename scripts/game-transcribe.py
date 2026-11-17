@@ -248,6 +248,7 @@ def main():
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--raw-f32", action="store_true")
     parser.add_argument("--separate", action="store_true")
+    parser.add_argument("--vocal-output")
     args = parser.parse_args()
     stage = "initializing"
     try:
@@ -296,12 +297,21 @@ def main():
                     "backend": "cpu",
                     "completedWindows": done,
                     "totalWindows": total_windows,
+                    "separationWindows": sep_windows,
                     "progress": done / total_windows,
                 })
 
             vocals = separator.separate(stereo, sep_progress)
+            if args.vocal_output:
+                try:
+                    mdx.write_stereo(args.vocal_output, vocals, gain=1)
+                    emit({"type": "vocal-stem", "available": True})
+                except OSError:
+                    emit({"type": "vocal-stem", "available": False})
             samples = vocals.mean(axis=0).astype(np.float32)
             del vocals, stereo, separator
+            stage = "loading-game"
+            emit({"type": "status", "stage": stage, "backend": "cpu"})
             model = GameModel(directory, args.language, args.steps)
             stage = "transcribing"
 

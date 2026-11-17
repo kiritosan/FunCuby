@@ -16,6 +16,7 @@ const STAGE_RANK = new Map(
         "loading",
         "warming",
         "separating",
+        "loading-game",
         "transcribing",
         "extracting",
     ].map((stage, index) => [stage, index]),
@@ -52,6 +53,7 @@ const freeze = (value) => Object.freeze(value);
 export class TranscriptionJob {
     #createWorker;
     #onUpdate;
+    #onVocalStem;
     #now;
     #setIntervalFn;
     #clearIntervalFn;
@@ -64,6 +66,7 @@ export class TranscriptionJob {
     #progress = null;
     #completedWindows = 0;
     #totalWindows = null;
+    #separationWindows = null;
     #audioSeconds = null;
     #tensorCount = null;
     #startedAt = null;
@@ -79,6 +82,7 @@ export class TranscriptionJob {
                 type: "module",
             }),
         onUpdate = () => {},
+        onVocalStem = () => {},
         now = () => performance.now(),
         // Wrapped: calling the bare natives with the job as receiver throws
         // "Illegal invocation" in the browser.
@@ -87,6 +91,7 @@ export class TranscriptionJob {
     } = {}) {
         this.#createWorker = createWorker;
         this.#onUpdate = onUpdate;
+        this.#onVocalStem = onVocalStem;
         this.#now = now;
         this.#setIntervalFn = setIntervalFn;
         this.#clearIntervalFn = clearIntervalFn;
@@ -104,6 +109,7 @@ export class TranscriptionJob {
             progress: this.#progress,
             completedWindows: this.#completedWindows,
             totalWindows: this.#totalWindows,
+            separationWindows: this.#separationWindows,
             audioSeconds: this.#audioSeconds,
             elapsedMs: this.#startedAt === null ? 0 : ended - this.#startedAt,
             lastActivityAgeMs:
@@ -235,6 +241,7 @@ export class TranscriptionJob {
         this.#progress = null;
         this.#completedWindows = 0;
         this.#totalWindows = null;
+        this.#separationWindows = null;
         this.#audioSeconds = null;
         this.#tensorCount = null;
         this.#error = null;
@@ -368,6 +375,11 @@ export class TranscriptionJob {
             return;
         }
         if (message === null) return; // stale job id — not ours
+        if (message.type === "vocal-stem") {
+            if (run.engine === "game-separated")
+                this.#onVocalStem(message.blob);
+            return;
+        }
         if (message.type === "status") {
             // A counts-only update still represents real completed work:
             // derive progress from the merged window counts before the
@@ -451,6 +463,12 @@ export class TranscriptionJob {
     // completedWindows / totalWindows exactly (same JS producer).
     #statusInvariantError(message) {
         if (
+            this.#separationWindows !== null &&
+            message.separationWindows !== undefined &&
+            message.separationWindows !== this.#separationWindows
+        )
+            return "Separation window total changed during a job";
+        if (
             this.#totalWindows !== null &&
             message.totalWindows !== undefined &&
             message.totalWindows !== this.#totalWindows
@@ -494,6 +512,8 @@ export class TranscriptionJob {
             if (this.#totalWindows === null) this.#lastActivity = this.#now();
             this.#totalWindows = message.totalWindows;
         }
+        if (message.separationWindows !== undefined)
+            this.#separationWindows = message.separationWindows;
         if (message.tensorCount !== undefined)
             this.#tensorCount = message.tensorCount;
         this.#emit();

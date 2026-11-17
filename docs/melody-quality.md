@@ -14,8 +14,9 @@ Stop/source change/pagehide abort loading and disconnect scheduled sources.
 
 ## Optional local GAME and vocal separation
 
-The browser Basic Pitch path remains the default and uses CPU. The experimental
-GAME 1.0.3 small ONNX path targets **singing**, not general instrumental mixtures.
+The browser Basic Pitch path uses CPU and handles instrumental audio. New
+sessions select direct GAME when available and Basic Pitch otherwise. The page
+remembers the chosen mode. The GAME 1.0.3 small ONNX path targets singing.
 It runs on localhost in a directly owned Python process with ONNX Runtime's CPU
 provider; no PyTorch, cloud inference, or browser GPU is needed. ORT telemetry is
 disabled. Audio is posted from the worker to the local service, not the internet.
@@ -49,15 +50,23 @@ MDX-Net Voc FT ONNX model for CPU vocal separation. See
 ## Usage and comparison
 
 1. Import audio as before. Start with a familiar 20-30 second vocal phrase.
-2. For a mixed song with a lead vocal, select **Vocal separation + GAME** and
-   the singing language. **GAME** runs directly on the mix and skips the
-   separation pass. For instrumental clips, start with **Browser lightweight**
-   (Basic Pitch).
+2. Select **GAME · Clear vocals** and the singing language for a quick draft
+   from a clear lead vocal. If the backing track masks the singer, select
+   **UVR + GAME · Mixed vocals** to extract the vocal stem before transcription.
+   For instrumental clips, select **Browser · Instruments** (Basic Pitch).
 3. Both GAME modes initially select working-melody piano playback at detected
    note timings. Listen to the same phrase in the source and the draft before
    comparing the simplified versions.
 4. Switching between completed modes restores their independent captures
    without re-inference.
+
+During a run, the progress panel shows each phase. Basic Pitch and GAME count
+completed inference windows. UVR + GAME tracks UVR and GAME separately. Each
+UVR window goes through spectrogram conversion, vocal extraction and waveform
+reconstruction before it is joined with the rest of the clip. You can play or
+download the 44.1 kHz stereo vocal WAV when separation finishes, including while
+GAME is still running. The browser holds the WAV for the current clip until
+the clip is changed or the page is reloaded. Download the WAV to keep it.
 
 After a new capture, the page estimates tempo and beat origin from the note
 onsets and recommends a semitone shift using the detected pitch classes and

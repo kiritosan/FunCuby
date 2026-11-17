@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, open, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pipeline } from "node:stream/promises";
 import {
     GAME_LANGUAGES,
     MAX_AUDIO_SECONDS,
@@ -12,6 +14,7 @@ const MAX_MONO_BYTES = 44100 * MAX_AUDIO_SECONDS * 4;
 const MAX_STEREO_BYTES = MAX_MONO_BYTES * 2;
 const MAX_STDOUT = 8 * 1024 * 1024;
 const JOB_TIMEOUT = 25 * 60 * 1000;
+const STEM_TTL = 60_000;
 
 class RequestError extends Error {
     constructor(status, code, message) {
@@ -42,8 +45,18 @@ export function createGameTranscription({
     jobTimeout = JOB_TIMEOUT,
 } = {}) {
     let active = null,
+        retainedStem = null,
         probe = null,
         probedAt = 0;
+    const removeDirectory = (path) =>
+        rm(path, { recursive: true, force: true }).catch(() => {});
+    function expireStem(stem) {
+        if (retainedStem === stem) retainedStem = null;
+        clearTimeout(stem.expiry);
+        // A streaming response may still hold the file open on Windows.
+        stem.expired = true;
+        if (!stem.readers) void removeDirectory(stem.directory);
+    }
     const launch = (args) =>
         spawnImpl(
             python,
@@ -125,6 +138,7 @@ export function createGameTranscription({
             ![
                 "/api/transcription/game",
                 "/api/transcription/game/status",
+                "/api/transcription/game/vocals",
             ].includes(url.pathname)
         )
             return false;
@@ -156,6 +170,49 @@ export function createGameTranscription({
                 if (!["GET", "HEAD"].includes(req.method))
                     throw new RequestError(405, "method", "Expected GET");
                 json(res, 200, await readiness());
+                return true;
+            }
+            if (url.pathname.endsWith("/vocals")) {
+                if (req.method !== "GET")
+                    throw new RequestError(405, "method", "Expected GET");
+                const id = url.searchParams.get("id");
+                const stem = [active, retainedStem].find(
+                    (candidate) =>
+                        candidate?.ready &&
+                        !candidate.delivered &&
+                        !candidate.readers &&
+                        candidate.id === id,
+                );
+                if (!stem)
+                    throw new RequestError(
+                        404,
+                        "unavailable",
+                        "Vocal stem unavailable",
+                    );
+                stem.readers++;
+                try {
+                    const vocal = await open(stem.path, "r");
+                    try {
+                        const { size } = await vocal.stat();
+                        if (size <= 44 || size > MAX_STEREO_BYTES / 2 + 44)
+                            throw new Error("Invalid vocal stem size");
+                        res.writeHead(200, {
+                            "Content-Type": "audio/wav",
+                            "Content-Length": size,
+                            "Cache-Control": "no-store",
+                            "X-Content-Type-Options": "nosniff",
+                        });
+                        await pipeline(vocal.createReadStream(), res);
+                        stem.delivered = true;
+                        if (retainedStem === stem) expireStem(stem);
+                    } finally {
+                        await vocal.close();
+                    }
+                } finally {
+                    stem.readers--;
+                    if (stem.expired && !stem.readers)
+                        void removeDirectory(stem.directory);
+                }
                 return true;
             }
             if (req.method !== "POST")
@@ -210,6 +267,13 @@ export function createGameTranscription({
             res.once("close", disconnect);
             directory = await mkdtemp(join(tmpdir(), "funcuby-game-"));
             const input = join(directory, "input.f32");
+            if (separate)
+                Object.assign(token, {
+                    id: randomUUID(),
+                    directory,
+                    path: join(directory, "vocals.wav"),
+                    readers: 0,
+                });
             const file = await open(input, "wx");
             let bytes = 0;
             const uploadTimer = setTimeout(
@@ -264,7 +328,9 @@ export function createGameTranscription({
                         "--raw-f32",
                         "--language",
                         language,
-                        ...(separate ? ["--separate"] : []),
+                        ...(separate
+                            ? ["--separate", "--vocal-output", token.path]
+                            : []),
                     ]);
                     timeout = setTimeout(
                         () =>
@@ -294,6 +360,19 @@ export function createGameTranscription({
                                         "Unexpected trailing GAME event",
                                     );
                                 const event = JSON.parse(line);
+                                if (event.type === "vocal-stem" && separate) {
+                                    token.ready = event.available === true;
+                                    if (!res.destroyed && !res.writableEnded)
+                                        res.write(
+                                            JSON.stringify({
+                                                type: "vocal-stem",
+                                                id: token.ready
+                                                    ? token.id
+                                                    : null,
+                                            }) + "\n",
+                                        );
+                                    continue;
+                                }
                                 if (
                                     !["status", "result", "error"].includes(
                                         event.type,
@@ -369,11 +448,24 @@ export function createGameTranscription({
                     });
                 });
             }
-            if (directory)
-                await rm(directory, { recursive: true, force: true }).catch(
+            // The child and upload are closed. Disk cleanup in this job's
+            // private directory must not hold up a retry.
+            if (active === token) active = null;
+            if (token?.ready && !token.delivered && !disconnected) {
+                if (retainedStem) expireStem(retainedStem);
+                retainedStem = token;
+                token.expiry = setTimeout(() => expireStem(token), STEM_TTL);
+                token.expiry.unref();
+                await rm(join(directory, "input.f32"), { force: true }).catch(
                     () => {},
                 );
-            if (active === token) active = null;
+            } else if (directory && token?.readers) {
+                token.ready = false;
+                token.expired = true;
+            } else if (directory) {
+                token.ready = false;
+                await removeDirectory(directory);
+            }
         }
         return true;
     }

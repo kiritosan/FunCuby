@@ -55,15 +55,15 @@ export function createMelodyEditor({
     };
     const heading = el("h3", text("title"));
     const hint = el("p", text("hint"), "muted play-hint");
-    const range = el("div", "", "tempo-controls");
+    const range = el("div", "", "transcribe-fields");
     const from = number("from", 0, 0, 600, 0.01);
     const to = number("to", 10, 0, 600, 0.01);
-    const loopLabel = el("label"),
+    const loopLabel = el("label", "", "melody-editor-loop"),
         loop = el("input");
     loop.type = "checkbox";
     loop.dataset.field = "loop";
     loopLabel.append(loop, el("span", text("loop")));
-    const status = el("span", "", "muted");
+    const status = el("p", "", "muted transcribe-status-line");
     status.setAttribute("role", "status");
     const player = createPhrasePlayer(getContext, piano, {
         onUpdate: (state) => {
@@ -107,16 +107,16 @@ export function createMelodyEditor({
     }
     const sourceButton = button("source", () => play("source"));
     const pianoButton = button("piano", () => play("piano"));
-    range.append(
-        from.label,
-        to.label,
-        loopLabel,
+    range.append(from.label, to.label);
+    const transport = el("div", "", "play-controls");
+    transport.append(
         sourceButton,
         pianoButton,
         button("stop", stop),
+        loopLabel,
     );
     const navigation = el("div", "", "play-controls");
-    const summary = el("span", "", "muted");
+    const summary = el("p", "", "muted transcribe-status-line");
     function move(direction) {
         stop();
         const width = Math.min(
@@ -140,12 +140,11 @@ export function createMelodyEditor({
     navigation.append(
         button("previous", () => move(-1)),
         button("next", () => move(1)),
-        summary,
     );
     const list = el("div", "", "melody-editor-list");
     list.setAttribute("role", "group");
     list.setAttribute("aria-label", text("notes"));
-    const fields = el("div", "", "tempo-controls");
+    const fields = el("div", "", "transcribe-fields");
     const pitch = number("pitch", 60, 0, 127, 1);
     const start = number("start", 0, 0, 600, 0.001);
     const duration = number("duration", 0.25, 0.001, 600, 0.001);
@@ -236,13 +235,15 @@ export function createMelodyEditor({
         reset,
         exportButton,
     );
-    const editedStatus = el("p", "", "muted");
+    const editedStatus = el("p", "", "muted transcribe-status-line");
     host.append(
         heading,
         hint,
         range,
+        transport,
         status,
         navigation,
+        summary,
         list,
         fields,
         actions,

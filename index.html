@@ -542,7 +542,7 @@
                 <article class="card">
                     <h2 data-i18n="transcribe.title"></h2>
                     <p class="muted" data-i18n="transcribe.intro"></p>
-                    <div class="play-controls">
+                    <div class="play-controls transcribe-file-row">
                         <label class="button"
                             ><span data-i18n="transcribe.chooseAudio"></span
                             ><input
@@ -570,13 +570,13 @@
                             type="button"
                             hidden
                             data-i18n="transcribe.cancel"
-                        ></button
-                        ><span
-                            id="transcribe-fetch-status"
-                            class="muted"
-                            role="status"
-                        ></span>
+                        ></button>
                     </div>
+                    <p
+                        id="transcribe-fetch-status"
+                        class="muted transcribe-status-line"
+                        role="status"
+                    ></p>
                     <p
                         class="muted play-hint"
                         data-i18n="transcribe.url.hint"
@@ -604,10 +604,13 @@
                         class="muted play-hint"
                         data-i18n="transcribe.sourceHint"
                     ></p>
-                    <div class="transcribe-audition-settings">
+                    <div class="transcribe-fields transcribe-engine-fields">
                         <label
                             ><span data-i18n="transcribe.engine"></span>
-                            <select id="transcribe-engine">
+                            <select
+                                id="transcribe-engine"
+                                aria-describedby="transcribe-engine-status"
+                            >
                                 <option
                                     value="basic-pitch"
                                     data-i18n="transcribe.engineBasic"
@@ -642,46 +645,113 @@
                     </div>
                     <p
                         id="transcribe-engine-status"
-                        class="muted play-hint"
+                        class="muted transcribe-status-line"
+                        role="status"
                         data-i18n="transcribe.engineChecking"
                     ></p>
-                    <div id="transcribe-clip" class="tempo-controls" hidden>
-                        <label
-                            ><span data-i18n="transcribe.clipStart"></span
-                            ><input
-                                id="transcribe-start"
-                                type="number"
-                                min="0"
-                                step="0.1"
-                                value="0" /></label
-                        ><label
-                            ><span data-i18n="transcribe.clipLength"></span
-                            ><input
-                                id="transcribe-length"
-                                type="number"
-                                min="1"
-                                max="600"
-                                step="0.1"
-                                value="600" /></label
-                        ><button
-                            id="transcribe-run"
-                            class="primary"
-                            type="button"
-                            disabled
-                            data-i18n="transcribe.run"
-                        ></button
-                        ><button
-                            id="transcribe-cancel"
-                            type="button"
-                            hidden
-                            data-i18n="transcribe.cancel"
-                        ></button
-                        ><span
+                    <dl class="transcribe-engine-guide">
+                        <div>
+                            <dt data-i18n="transcribe.engineBasic"></dt>
+                            <dd data-i18n="transcribe.engineBasicGuide"></dd>
+                        </div>
+                        <div>
+                            <dt data-i18n="transcribe.engineGame"></dt>
+                            <dd data-i18n="transcribe.engineGameGuide"></dd>
+                        </div>
+                        <div>
+                            <dt data-i18n="transcribe.engineGameSeparated"></dt>
+                            <dd
+                                data-i18n="transcribe.engineGameSeparatedGuide"
+                            ></dd>
+                        </div>
+                    </dl>
+                    <div id="transcribe-clip" class="transcribe-form" hidden>
+                        <div class="transcribe-fields">
+                            <label
+                                ><span data-i18n="transcribe.clipStart"></span
+                                ><input
+                                    id="transcribe-start"
+                                    type="number"
+                                    min="0"
+                                    step="0.1"
+                                    value="0" /></label
+                            ><label
+                                ><span data-i18n="transcribe.clipLength"></span
+                                ><input
+                                    id="transcribe-length"
+                                    type="number"
+                                    min="1"
+                                    max="600"
+                                    step="0.1"
+                                    value="600"
+                            /></label>
+                        </div>
+                        <div class="play-controls transcribe-form-actions">
+                            <button
+                                id="transcribe-run"
+                                class="primary"
+                                type="button"
+                                disabled
+                                data-i18n="transcribe.run"
+                            ></button
+                            ><button
+                                id="transcribe-cancel"
+                                type="button"
+                                hidden
+                                data-i18n="transcribe.cancel"
+                            ></button>
+                        </div>
+                        <p
                             id="transcribe-status"
+                            class="muted transcribe-status-line"
+                            role="status"
+                        ></p>
+                    </div>
+                    <section
+                        id="transcribe-pipeline"
+                        class="transcribe-pipeline"
+                        aria-labelledby="transcribe-pipeline-title"
+                        hidden
+                    >
+                        <h3
+                            id="transcribe-pipeline-title"
+                            data-i18n="transcribe.pipeline.title"
+                        ></h3>
+                        <ol id="transcribe-pipeline-steps" role="list"></ol>
+                    </section>
+                    <section
+                        id="transcribe-vocals"
+                        class="transcribe-vocals"
+                        aria-labelledby="transcribe-vocals-title"
+                        hidden
+                    >
+                        <h3
+                            id="transcribe-vocals-title"
+                            data-i18n="transcribe.vocals.title"
+                        ></h3>
+                        <p
+                            id="transcribe-vocals-status"
                             class="muted"
                             role="status"
-                        ></span>
-                    </div>
+                        ></p>
+                        <div
+                            class="play-controls"
+                            id="transcribe-vocals-actions"
+                            hidden
+                        >
+                            <audio
+                                id="transcribe-vocals-audio"
+                                controls
+                                preload="metadata"
+                                aria-labelledby="transcribe-vocals-title"
+                            ></audio>
+                            <a
+                                class="button"
+                                id="transcribe-vocals-download"
+                                data-i18n="transcribe.vocals.download"
+                            ></a>
+                        </div>
+                    </section>
                     <p
                         id="transcribe-diagnostic"
                         class="muted play-hint"
@@ -708,47 +778,52 @@
                         role="group"
                         data-i18n-attr="aria-label:transcribe.levels"
                     ></div>
-                    <div class="tempo-controls">
-                        <label
-                            >BPM<input
-                                id="transcribe-bpm"
-                                type="number"
-                                min="20"
-                                max="240"
-                                step="1"
-                                value="120" /></label
-                        ><label
-                            ><span data-i18n="transcribe.origin"></span
-                            ><input
-                                id="transcribe-origin"
-                                type="number"
-                                min="0"
-                                step="1"
-                                value="0" /></label
-                        ><label
-                            ><span data-i18n="transcribe.transpose"></span
-                            ><input
-                                id="transcribe-transpose"
-                                type="number"
-                                min="-12"
-                                max="12"
-                                step="1"
-                                value="0" /></label
-                        ><button
-                            id="transcribe-auto-fit"
-                            type="button"
-                            data-i18n="transcribe.autoFit"
-                        ></button
-                        ><button
-                            id="transcribe-original-key"
-                            type="button"
-                            data-i18n="transcribe.originalKey"
-                        ></button>
+                    <div class="transcribe-form">
+                        <div class="transcribe-fields">
+                            <label
+                                >BPM<input
+                                    id="transcribe-bpm"
+                                    type="number"
+                                    min="20"
+                                    max="240"
+                                    step="1"
+                                    value="120" /></label
+                            ><label
+                                ><span data-i18n="transcribe.origin"></span
+                                ><input
+                                    id="transcribe-origin"
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    value="0" /></label
+                            ><label
+                                ><span data-i18n="transcribe.transpose"></span
+                                ><input
+                                    id="transcribe-transpose"
+                                    type="number"
+                                    min="-12"
+                                    max="12"
+                                    step="1"
+                                    value="0"
+                            /></label>
+                        </div>
+                        <div class="play-controls transcribe-form-actions">
+                            <button
+                                id="transcribe-auto-fit"
+                                type="button"
+                                data-i18n="transcribe.autoFit"
+                            ></button
+                            ><button
+                                id="transcribe-original-key"
+                                type="button"
+                                data-i18n="transcribe.originalKey"
+                            ></button>
+                        </div>
                     </div>
                     <p id="transcribe-analysis" class="muted play-hint"></p>
                     <details id="transcribe-advanced">
                         <summary data-i18n="transcribe.advanced"></summary>
-                        <div class="tempo-controls">
+                        <div class="transcribe-fields transcribe-pitch-fields">
                             <label
                                 ><span data-i18n="transcribe.minPitch"></span
                                 ><input

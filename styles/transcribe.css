@@ -76,6 +76,150 @@
     max-width: 100%;
 }
 
+#panel-transcribe .play-controls {
+    gap: 0.5rem 0.75rem;
+}
+
+#panel-transcribe .play-controls > button {
+    max-width: 100%;
+    white-space: normal;
+}
+
+.transcribe-file-row {
+    margin-bottom: 0.75rem;
+}
+
+#transcribe-source-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.transcribe-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr));
+    gap: 0.75rem;
+    align-items: end;
+    min-width: 0;
+}
+
+.transcribe-fields label {
+    margin: 0;
+    min-width: 0;
+    gap: 0.375rem;
+}
+
+.transcribe-engine-fields {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+    max-width: 36rem;
+    margin-top: 1rem;
+}
+
+.transcribe-engine-guide {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+    gap: 0.75rem;
+    margin: 0.75rem 0 0;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+}
+
+.transcribe-engine-guide > div {
+    padding: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+}
+
+.transcribe-engine-guide dt {
+    font-weight: 600;
+}
+
+.transcribe-engine-guide dd {
+    margin: 0.25rem 0 0;
+    color: var(--muted);
+}
+
+.transcribe-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.transcribe-form > .transcribe-fields {
+    flex: 1 1 17rem;
+    max-width: 36rem;
+}
+
+.transcribe-form-actions {
+    min-width: 0;
+}
+
+.transcribe-status-line {
+    margin: 0.5rem 0 0;
+    font-size: 0.8125rem;
+    overflow-wrap: anywhere;
+}
+
+.transcribe-status-line:empty {
+    display: none;
+}
+
+.transcribe-form > .transcribe-status-line {
+    flex: 1 0 100%;
+    margin: 0;
+}
+
+.transcribe-pitch-fields {
+    max-width: 20rem;
+    margin-top: 0.75rem;
+}
+
+.transcribe-pipeline,
+.transcribe-vocals {
+    margin-top: 1rem;
+}
+
+.transcribe-pipeline h3,
+.transcribe-vocals h3 {
+    margin: 0 0 0.5rem;
+    font-size: 0.875rem;
+}
+
+#transcribe-pipeline-steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+    gap: 0.5rem;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+}
+
+#transcribe-pipeline-steps li {
+    display: grid;
+    align-content: start;
+    gap: 0.25rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+}
+
+#transcribe-pipeline-steps li[data-state="running"] {
+    border-color: var(--primary);
+}
+
+#transcribe-pipeline-steps progress {
+    width: 100%;
+    height: 0.5rem;
+    min-height: 0;
+    accent-color: var(--primary);
+}
+
+#transcribe-vocals-audio {
+    width: min(100%, 22rem);
+}
+
 .transcribe-audition-settings {
     display: flex;
     flex-wrap: wrap;
@@ -86,9 +230,11 @@
 
 .transcribe-audition-settings label {
     display: inline-flex;
+    flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.4rem;
+    margin: 0;
 }
 
 .transcribe-audition-settings input[type="range"] {
@@ -105,14 +251,8 @@
 }
 
 .transcribe-url-row input[type="url"] {
-    flex: 1 1 16rem;
+    flex: 1 1 12rem;
     width: auto;
-}
-
-.transcribe-url-row #transcribe-fetch-status {
-    flex: 1 1 8rem;
-    min-width: 0;
-    overflow-wrap: anywhere;
 }
 
 .transcribe-notes {
@@ -129,11 +269,12 @@
     margin: 0.5rem 0;
 }
 
+#transcribe-results {
+    margin-top: 0.75rem;
+}
+
 #transcribe-diagnostics {
-    min-height: 0;
-    margin: 2px 0 0;
-    padding: 3px 10px;
-    font-size: 11px;
+    margin-top: 0.75rem;
 }
 
 .melody-editor {
@@ -146,6 +287,33 @@
 
 .melody-editor h3 {
     margin: 0 0 0.4rem;
+}
+
+.melody-editor > .play-hint {
+    margin: 0 0 0.75rem;
+}
+
+.melody-editor > .transcribe-fields {
+    max-width: 36rem;
+}
+
+.melody-editor > .play-controls {
+    margin-top: 0.75rem;
+}
+
+.melody-editor-loop {
+    flex-direction: row;
+    align-items: center;
+    min-height: 40px;
+    margin: 0;
+}
+
+.melody-editor-loop input {
+    width: 1rem;
+    height: 1rem;
+    min-height: 0;
+    margin: 0;
+    accent-color: var(--primary);
 }
 
 .melody-editor-list {

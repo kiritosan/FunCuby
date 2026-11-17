@@ -68,11 +68,13 @@ def read_stereo(path, max_seconds=600):
 
 
 def write_stereo(path, audio, gain):
-    pcm = np.round(np.clip(audio.T * gain, -1, 32767 / 32768) * 32768).astype("<i2")
     with open(path, "xb") as target:
         with wave.open(target, "wb") as output:
-            output.setparams((2, 2, SAMPLE_RATE, 0, "NONE", "not compressed"))
-            output.writeframes(pcm.tobytes())
+            output.setparams((2, 2, SAMPLE_RATE, audio.shape[1], "NONE", "not compressed"))
+            for start in range(0, audio.shape[1], SAMPLE_RATE):
+                block = audio[:, start:start + SAMPLE_RATE].T
+                pcm = np.round(np.clip(block * gain, -1, 32767 / 32768) * 32768).astype("<i2")
+                output.writeframesraw(pcm.tobytes())
 
 
 class VocalSeparator:

@@ -91,6 +91,7 @@ async function initialize() {
         onStateChange: play.refresh,
     });
     transcribe = initTranscribePage({
+        preferences,
         notice,
         getOffset: device.getOffset,
         loadPracticeFile: (file) => teach.loadPracticeFile(file),

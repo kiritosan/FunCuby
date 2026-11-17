@@ -133,12 +133,28 @@ try {
     // This dedicated profile/port contains test data only, never the user's 5173 data.
     await browser.send("Storage.clearDataForOrigin", {
         origin: base,
-        storageTypes: "indexeddb",
+        storageTypes: "indexeddb,local_storage",
     });
     await browser.send("Page.navigate", { url: `${base}/#transcribe` });
     await browser.until(
         `document.getElementById("transcribe-storage-status")?.dataset.i18n === "transcribe.storage.empty"`,
     );
+    await browser.until(
+        `!document.getElementById("transcribe-engine-game").disabled`,
+    );
+    const engineValue = 'document.getElementById("transcribe-engine").value';
+    assert.equal(await browser.evaluate(engineValue), "game");
+    await browser.evaluate(`(() => {
+        const engine = document.getElementById("transcribe-engine");
+        engine.value = "basic-pitch";
+        engine.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`);
+    await browser.send("Page.reload", { ignoreCache: true });
+    await browser.until(
+        `document.getElementById("transcribe-storage-status")?.dataset.i18n === "transcribe.storage.empty" &&
+         !document.getElementById("transcribe-engine-game").disabled`,
+    );
+    assert.equal(await browser.evaluate(engineValue), "basic-pitch");
     await browser.evaluate(`(() => {
         document.getElementById("transcribe-url").value = "https://www.bilibili.com/video/BVtest";
         document.getElementById("transcribe-fetch").click();

@@ -83,7 +83,7 @@ try {
     browser = await openTestBrowser("edge-profile-melody-editor");
     await browser.send("Storage.clearDataForOrigin", {
         origin: base,
-        storageTypes: "indexeddb",
+        storageTypes: "indexeddb,local_storage",
     });
     await browser.send("Page.addScriptToEvaluateOnNewDocument", {
         source: instrument,
@@ -91,6 +91,15 @@ try {
     await browser.send("Page.navigate", { url: `${base}/#transcribe` });
     await browser.until(
         `document.getElementById("transcribe-storage-status")?.dataset.i18n === "transcribe.storage.empty"`,
+    );
+    await browser.until(
+        `document.getElementById("transcribe-engine-status").dataset.i18n === "transcribe.engineMissing"`,
+    );
+    assert.equal(
+        await browser.evaluate(
+            'document.getElementById("transcribe-engine").value',
+        ),
+        "basic-pitch",
     );
     const { root } = await browser.send("DOM.getDocument");
     const { nodeId } = await browser.send("DOM.querySelector", {
@@ -262,21 +271,46 @@ try {
     console.log(
         "PASS: split/merge/add/delete, bounded undo, raw reset and persisted edits work without reinference",
     );
-    await browser.send("Emulation.setDeviceMetricsOverride", {
-        width: 390,
-        height: 844,
-        deviceScaleFactor: 1,
-        mobile: true,
-    });
-    assert.equal(
-        await browser.evaluate(
-            `document.documentElement.scrollWidth > innerWidth`,
-        ),
-        false,
-    );
+    const checkLayout = async (width) => {
+        await browser.send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: 844,
+            deviceScaleFactor: 1,
+            mobile: width < 700,
+        });
+        assert.ok(
+            await browser.evaluate(`(() => {
+            const editor = document.getElementById("transcribe-editor");
+            const rect = (selector) => editor.querySelector(selector).getBoundingClientRect();
+            const clipEnd = rect('[data-field="to"]');
+            const source = rect('[data-action="source"]');
+            const stop = rect('[data-action="stop"]');
+            const previous = rect('[data-action="previous"]');
+            const loop = rect('[data-field="loop"]');
+            const split = rect('[data-field="splitAt"]');
+            const apply = rect('[data-action="apply"]');
+            return document.documentElement.scrollWidth <= innerWidth &&
+                source.top - clipEnd.bottom >= 8 && previous.top - stop.bottom >= 8 &&
+                apply.top - split.bottom >= 8 && loop.width <= 20 &&
+                [...document.querySelectorAll(".transcribe-engine-guide dd")].every(node =>
+                    node.textContent.trim() && node.scrollWidth <= node.clientWidth);
+        })()`),
+            `Transcription and editor controls should fit with consistent gaps at ${width}px`,
+        );
+    };
+    await checkLayout(390);
+    await browser.evaluate(`(() => {
+        const locale = document.getElementById("locale");
+        locale.value = "en";
+        locale.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`);
+    await browser.until(`document.documentElement.lang === "en" &&
+        document.getElementById("transcribe-storage-status").dataset.i18n === "transcribe.storage.restored"`);
+    await checkLayout(320);
+    await checkLayout(1440);
     assert.deepEqual(browser.errors, []);
     console.log(
-        "PASS: editor fits mobile and has no browser runtime exceptions",
+        "PASS: Chinese and English guides and editor controls fit 320–1440 px without runtime exceptions",
     );
 } finally {
     if (browser) await browser.close();

@@ -23,11 +23,13 @@ import { TranscriptionStore } from "../../core/storage/transcription-store.js";
 import { workingNotes } from "../../core/transcription/melody-edit.js";
 import { analyzeMelody } from "../../core/transcription/musical-analysis.js";
 import { createMelodyEditor } from "./melody-editor.js";
+import { createPipelineView, pipelineWindows } from "./pipeline-view.js";
 
 const LEVELS = ["starter", "melody", "fuller", "original"];
 const PREVIEW_NOTES = 64;
 const FIRST_NOTE_MAX = 103;
 const MAX_URL_LENGTH = 2048;
+const ENGINE_PREFERENCE = "transcribe:engine";
 const SAVED_FIELDS = [
     "transcribe-start",
     "transcribe-length",
@@ -48,7 +50,13 @@ const SAVED_FIELDS = [
  * Recognizer notes stay immutable in captures. Working melody edits and
  * arrangement settings never rerun inference or overwrite the recognizer draft.
  */
-export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
+export function initTranscribePage({
+    notice,
+    getOffset,
+    loadPracticeFile,
+    preferences,
+}) {
+    const enginePicker = byId("transcribe-engine");
     let sourceUrl = null,
         decoded = null,
         sourceName = "",
@@ -63,6 +71,15 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
         importController = null,
         importSeq = 0,
         importing = false;
+    let showPipeline = false,
+        vocalUrl = null,
+        vocalRange = null,
+        vocalUnavailable = false;
+    const vocalAudio = byId("transcribe-vocals-audio");
+    const pipeline = createPipelineView(
+        byId("transcribe-pipeline"),
+        byId("transcribe-pipeline-steps"),
+    );
     const report = reportErrors((error) => notice(error, true));
     const captures = new Map();
     const storage = new TranscriptionStore();
@@ -70,13 +87,26 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
         storageRevision = 0,
         restoreAllowed = true,
         pageGone = false,
+        engineChosen = false,
         userEditedArrangement = false;
     const task = new TranscriptionJob({
+        onVocalStem: (blob) => {
+            if (!showPipeline || pageGone || !vocalRange) return;
+            vocalUnavailable = blob === null;
+            if (blob) {
+                vocalUrl = URL.createObjectURL(blob);
+                vocalAudio.src = vocalUrl;
+                const link = byId("transcribe-vocals-download");
+                link.href = vocalUrl;
+                link.download = `${baseName()} · vocals.wav`;
+            }
+            renderVocal();
+        },
         // reportErrors defers the callback, so read the live snapshot here
         // instead of rendering a queued stale one. While a job is working,
         // render every update; otherwise only terminal snapshots may render
-        // (they only hide/freeze) — a stale "running" state can never revive
-        // status text or the diagnostic line after cancel/source change.
+        // to freeze the progress display. A stale "running" state cannot
+        // revive the status text after a cancellation or source change.
         onUpdate: report(() => {
             const snapshot = task.snapshot;
             if (phase === "working" || snapshot.status !== "running")
@@ -188,8 +218,13 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
 
     function applySavedDraft(record) {
         for (const key of SAVED_FIELDS) {
-            if (typeof record.state.settings[key] === "string")
-                byId(key).value = record.state.settings[key];
+            const value = record.state.settings[key];
+            if (typeof value !== "string") continue;
+            if (key === "transcribe-engine") {
+                if (!Object.hasOwn(TRANSCRIPTION_ENGINES, value)) continue;
+                engineChosen = true;
+            }
+            byId(key).value = value;
         }
         if (LEVELS.includes(record.state.level)) level = record.state.level;
         for (const button of byId("transcribe-levels").querySelectorAll(
@@ -300,6 +335,8 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
     // snapshot render, including the diagnostic line's elapsed/idle refresh.
     function invalidate() {
         job++;
+        showPipeline = false;
+        pipeline.reset();
         task.cancel();
         editor.stop();
         audition.stop();
@@ -314,6 +351,7 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
         if (clearCaptures) {
             captures.clear();
             userEditedArrangement = false;
+            clearVocal();
         }
         melodyNotes = null;
         arrangements = null;
@@ -348,6 +386,8 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
     function selectEngine(persist = true) {
         invalidate();
         resetResults(false);
+        vocalAudio.pause();
+        renderVocal();
         showError("");
         const saved = captures.get(
             captureKey(
@@ -371,11 +411,44 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
     }
 
     function pauseSource() {
+        vocalAudio.pause();
         try {
             byId("transcribe-source").pause();
         } catch {
             /* nothing playing */
         }
+    }
+
+    function renderVocal() {
+        const visible = !!vocalRange && enginePicker.value === "game-separated";
+        byId("transcribe-vocals").hidden = !visible;
+        byId("transcribe-vocals-actions").hidden = !vocalUrl;
+        if (!visible) return;
+        const key = vocalUrl
+            ? "ready"
+            : vocalUnavailable
+              ? "unavailable"
+              : "waiting";
+        const text = t(`transcribe.vocals.${key}`, {
+            start: formatClock(vocalRange.start),
+            end: formatClock(vocalRange.end),
+        });
+        const status = byId("transcribe-vocals-status");
+        if (status.textContent !== text) status.textContent = text;
+    }
+
+    function clearVocal() {
+        if (vocalUrl) {
+            vocalAudio.pause();
+            vocalAudio.removeAttribute("src");
+            vocalAudio.load();
+            byId("transcribe-vocals-download").removeAttribute("href");
+            URL.revokeObjectURL(vocalUrl);
+        }
+        vocalUrl = null;
+        vocalRange = null;
+        vocalUnavailable = false;
+        renderVocal();
     }
 
     function releaseSource() {
@@ -393,13 +466,16 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
     }
 
     function controls() {
-        byId("transcribe-engine").disabled = phase !== "idle" || importing;
+        enginePicker.disabled = phase !== "idle" || importing;
         byId("transcribe-language").disabled =
             phase !== "idle" ||
             importing ||
-            byId("transcribe-engine").value === "basic-pitch";
+            enginePicker.value === "basic-pitch";
         byId("transcribe-run").disabled =
-            !decoded || phase !== "idle" || importing;
+            !decoded ||
+            phase !== "idle" ||
+            importing ||
+            enginePicker.selectedOptions[0]?.disabled;
         byId("transcribe-cancel").hidden = phase !== "working";
         for (const id of ["transcribe-start", "transcribe-length"])
             byId(id).disabled = !decoded || importing;
@@ -659,7 +735,20 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
 
     // ---- transcription ------------------------------------------------------------------------
 
-    function jobStatusText({ stage, progress }) {
+    function jobStatusText(snapshot) {
+        const { stage, progress, engine } = snapshot;
+        const windows = pipelineWindows(
+            snapshot,
+            stage === "separating"
+                ? "separate"
+                : engine === "basic-pitch"
+                  ? "browser"
+                  : "game",
+        );
+        const percent = formatDecimal(
+            (windows ? windows.done / windows.total : (progress ?? 0)) * 100,
+            1,
+        );
         switch (stage) {
             case "initializing":
                 return t("transcribe.status.initializing");
@@ -669,11 +758,13 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
                 return t("transcribe.status.warming");
             case "separating":
                 return t("transcribe.status.separating", {
-                    percent: formatDecimal((progress ?? 0) * 100, 1),
+                    percent,
                 });
+            case "loading-game":
+                return t("transcribe.status.loadingGame");
             case "transcribing":
                 return t("transcribe.status.working", {
-                    percent: formatDecimal((progress ?? 0) * 100, 1),
+                    percent,
                 });
             case "extracting":
                 return t("transcribe.status.extracting");
@@ -713,6 +804,7 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
     }
 
     function renderJob(snapshot) {
+        if (showPipeline) pipeline.render(snapshot);
         const status = byId("transcribe-status");
         if (snapshot.status === "running") {
             const text = jobStatusText(snapshot);
@@ -776,12 +868,23 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
             !window.confirm(t("transcribe.editor.confirmRerun"))
         )
             return;
+        engineChosen = true;
+        preferences.set(ENGINE_PREFERENCE, engine);
         // Capture the decoded buffer now: preparation is async and a later
         // source change must never swap the PCM under a running job.
         const audioBuffer = decoded;
         resetResults(false);
         invalidate();
         const request = job;
+        showPipeline = true;
+        if (engine === "game-separated") {
+            clearVocal();
+            vocalRange = {
+                start: start * 1000,
+                end: (start + actualSeconds) * 1000,
+            };
+            renderVocal();
+        }
         showError("");
         pauseSource();
         phase = "working";
@@ -851,6 +954,10 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
                 { engine, language },
             );
             if (request !== job) return;
+            if (engine === "game-separated" && !vocalUrl) {
+                vocalUnavailable = true;
+                renderVocal();
+            }
             // A valid empty detection is not an empty draft card: surface the
             // translated guidance and keep results/actions hidden.
             if (!notes.length) throw new AppError("transcribe.errors.noNotes");
@@ -878,6 +985,10 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
         } catch (error) {
             if (request !== job || error?.name === "AbortError") return;
             phase = "idle";
+            if (engine === "game-separated" && !vocalUrl) {
+                vocalUnavailable = true;
+                renderVocal();
+            }
             byId("transcribe-status").textContent = "";
             hideDiagnostic();
             showError(transcriptionErrorText(error));
@@ -887,6 +998,9 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
 
     function cancel() {
         invalidate();
+        showPipeline = true;
+        pipeline.render(task.snapshot);
+        if (!vocalUrl) clearVocal();
         byId("transcribe-status").textContent = t(
             "transcribe.status.cancelled",
         );
@@ -1156,11 +1270,21 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
     }
 
     renderLevelCards();
-    byId("transcribe-engine").addEventListener("change", () => selectEngine());
+    enginePicker.addEventListener("change", () => {
+        engineChosen = true;
+        preferences.set(ENGINE_PREFERENCE, enginePicker.value);
+        selectEngine();
+    });
     byId("transcribe-language").addEventListener("change", () =>
         selectEngine(),
     );
     byId("transcribe-source").addEventListener("play", () => {
+        vocalAudio.pause();
+        editor.stop();
+        audition.stop();
+    });
+    vocalAudio.addEventListener("play", () => {
+        byId("transcribe-source").pause();
         editor.stop();
         audition.stop();
     });
@@ -1187,6 +1311,7 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
         .then((response) => (response.ok ? response.json() : null))
         .catch(() => null)
         .then((status) => {
+            if (pageGone) return;
             byId("transcribe-engine-game").disabled = !status?.available;
             byId("transcribe-engine-game-separated").disabled = !(
                 status?.available && status?.separationAvailable
@@ -1198,6 +1323,19 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
                 : "transcribe.engineMissing";
             byId("transcribe-engine-status").dataset.i18n = key;
             byId("transcribe-engine-status").textContent = t(key);
+            if (!engineChosen) {
+                const preferred = preferences.get(ENGINE_PREFERENCE);
+                const available = Array.from(enginePicker.options).some(
+                    (option) => option.value === preferred && !option.disabled,
+                );
+                enginePicker.value = available
+                    ? preferred
+                    : status?.available
+                      ? "game"
+                      : "basic-pitch";
+                saveState();
+            }
+            controls();
         });
     byId("transcribe-file").addEventListener(
         "change",

@@ -24,7 +24,7 @@ const seconds = Number(
 assert.ok(seconds > 0 && seconds <= 600);
 const sampleRate = game ? 44100 : 22050;
 const artifacts = resolve(".test-artifacts");
-const artifactName = separated
+const artifactBase = separated
     ? "transcription-game-separated"
     : game
       ? "transcription-game-quality"
@@ -33,6 +33,8 @@ const artifactName = separated
         : gpuEnabled
           ? "transcription-gpu-enabled-cpu-default"
           : "transcription-long-run";
+const artifactName =
+    seconds === 219 ? artifactBase : `${artifactBase}-${seconds}s`;
 const reportPath = resolve(artifacts, `${artifactName}.json`);
 const fixture = customClip
     ? resolve(customClip)
@@ -206,15 +208,17 @@ try {
             ),
             "Local GAME environment is unavailable",
         );
-        await evaluate(`(() => {
-            const engine = document.getElementById("transcribe-engine");
-            engine.value = ${JSON.stringify(engine)};
-            engine.dispatchEvent(new Event("change"));
+    }
+    await evaluate(`(() => {
+        const engine = document.getElementById("transcribe-engine");
+        engine.value = ${JSON.stringify(engine)};
+        engine.dispatchEvent(new Event("change"));
+        if (${game}) {
             const language = document.getElementById("transcribe-language");
             language.value = "zh";
             language.dispatchEvent(new Event("change"));
-        })()`);
-    }
+        }
+    })()`);
     await evaluate(`(() => {
         const NativeWorker = window.Worker;
         window.__longRunEvents = [];
@@ -235,6 +239,8 @@ try {
                         progress: data?.progress,
                         completedWindows: data?.completedWindows,
                         totalWindows: data?.totalWindows,
+                        separationWindows: data?.separationWindows,
+                        vocalBytes: data?.blob?.size,
                         tensorCount: data?.tensorCount,
                         noteCount: Array.isArray(data?.notes)
                             ? data.notes.length
@@ -356,7 +362,75 @@ try {
                 .slice(firstGameWindow)
                 .every((event) => event.stage === "transcribing"),
         );
+        assert.ok(completed[0].separationWindows > 0);
+        const vocalEvent = report.events.find(
+            (event) => event.type === "vocal-stem",
+        );
+        assert.equal(vocalEvent?.vocalBytes, seconds * sampleRate * 4 + 44);
+        assert.ok(
+            report.events.indexOf(vocalEvent) < report.events.indexOf(terminal),
+        );
+        assert.ok(
+            await until(`(() => {
+            const audio = document.getElementById("transcribe-vocals-audio");
+            return !document.getElementById("transcribe-vocals-actions").hidden &&
+                audio.src.startsWith("blob:");
+        })()`),
+            "Isolated audio controls were not shown",
+        );
+        report.vocals = await evaluate(`(async () => {
+            const audio = document.getElementById("transcribe-vocals-audio");
+            const link = document.getElementById("transcribe-vocals-download");
+            try {
+                await Promise.race([
+                    audio.play(),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error("Playback timed out")), 8000)),
+                ]);
+            } catch (error) {
+                return { error: error.message, mediaError: audio.error?.message,
+                    readyState: audio.readyState, networkState: audio.networkState };
+            }
+            const end = Date.now() + 2500;
+            while (audio.currentTime === 0 && Date.now() < end)
+                await new Promise(resolve => setTimeout(resolve, 50));
+            audio.pause();
+            return { duration: audio.duration, played: audio.currentTime > 0, link: link.download };
+        })()`);
+        assert.equal(
+            report.vocals.error,
+            undefined,
+            JSON.stringify(report.vocals),
+        );
+        assert.equal(report.vocals.duration, seconds);
+        assert.equal(report.vocals.played, true);
+        assert.match(report.vocals.link, /vocals\.wav$/);
     }
+    assert.deepEqual(
+        await evaluate(`[...document.querySelectorAll("#transcribe-pipeline-steps li")].map(
+            node => [node.dataset.step, node.dataset.state]
+        )`),
+        [
+            "prepare",
+            "load",
+            ...(separated ? ["separate"] : []),
+            game ? "game" : "browser",
+            "finish",
+        ].map((step) => [step, "done"]),
+    );
+    const inferenceWindows = completed.filter(
+        (event) => event.stage === "transcribing",
+    ).length;
+    assert.deepEqual(
+        await evaluate(`[...document.querySelectorAll("#transcribe-pipeline-steps progress:not([hidden])")].map(
+            node => [node.value, node.max]
+        )`),
+        [
+            ...(separated
+                ? [Array(2).fill(completed[0].separationWindows)]
+                : []),
+            [inferenceWindows, inferenceWindows],
+        ],
+    );
     if (!game)
         assert.equal(
             new Set(completed.map((event) => event.tensorCount)).size,
@@ -391,13 +465,49 @@ try {
             JSON.stringify(await evaluate("window.__qualityNotes"), null, 2),
         );
     }
+    if (separated) {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width: 390,
+            height: 844,
+            deviceScaleFactor: 1,
+            mobile: true,
+        });
+        assert.ok(
+            await evaluate(
+                `document.documentElement.scrollWidth <= innerWidth`,
+            ),
+        );
+    }
+    try {
+        await writeFile(
+            resolve(artifacts, `${artifactName}.png`),
+            Buffer.from(
+                (
+                    await send("Page.captureScreenshot", {
+                        format: "png",
+                        captureBeyondViewport: true,
+                    })
+                ).data,
+                "base64",
+            ),
+        );
+    } catch (error) {
+        report.screenshotFailure = String(error?.message ?? error);
+        console.warn(
+            "Screenshot artifact unavailable:",
+            report.screenshotFailure,
+        );
+    }
     if (game) {
         const before = report.events.length;
-        await evaluate(`(() => {
+        const hiddenWhileInBasicPitch = await evaluate(`(() => {
             const engine = document.getElementById("transcribe-engine");
             engine.value = "basic-pitch"; engine.dispatchEvent(new Event("change"));
+            const hidden = document.getElementById("transcribe-vocals").hidden;
             engine.value = ${JSON.stringify(engine)}; engine.dispatchEvent(new Event("change"));
+            return hidden;
         })()`);
+        assert.equal(hiddenWhileInBasicPitch, true);
         assert.equal(await evaluate("window.__longRunEvents.length"), before);
         assert.equal(
             await evaluate(
@@ -407,6 +517,12 @@ try {
         );
     }
     if (separated) {
+        assert.equal(
+            await evaluate(
+                'document.getElementById("transcribe-vocals-actions").hidden',
+            ),
+            false,
+        );
         report.analysis = await evaluate(`(async () => {
             const { analyzeMelody } = await import("/src/core/transcription/musical-analysis.js");
             const read = (id) => document.getElementById("transcribe-" + id);
@@ -457,31 +573,17 @@ try {
             ),
             false,
         );
+        assert.equal(
+            await evaluate(
+                'document.getElementById("transcribe-vocals").hidden',
+            ),
+            true,
+        );
         assert.deepEqual(
             await evaluate(`["bpm", "origin", "transpose"].map(
             id => Number(document.getElementById("transcribe-" + id).value)
         )`),
             fitted,
-        );
-    }
-    try {
-        await writeFile(
-            resolve(artifacts, `${artifactName}.png`),
-            Buffer.from(
-                (
-                    await send("Page.captureScreenshot", {
-                        format: "png",
-                        captureBeyondViewport: true,
-                    })
-                ).data,
-                "base64",
-            ),
-        );
-    } catch (error) {
-        report.screenshotFailure = String(error?.message ?? error);
-        console.warn(
-            "Screenshot artifact unavailable:",
-            report.screenshotFailure,
         );
     }
     report.passed = true;

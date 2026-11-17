@@ -1,5 +1,10 @@
 import { TranscriptionError } from "./errors.js";
-import { encodeStatus, encodeResult } from "./protocol.js";
+import {
+    encodeStatus,
+    encodeResult,
+    encodeVocalStem,
+    MAX_VOCAL_BYTES,
+} from "./protocol.js";
 
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
@@ -57,7 +62,39 @@ export async function transcribeGame(
     let buffered = "",
         bytes = 0,
         terminal = false,
+        stemTransfer,
         result = null;
+    async function downloadStem(id) {
+        let blob = null;
+        if (typeof id === "string" && /^[0-9a-f-]{36}$/.test(id)) {
+            try {
+                const url = new URL(
+                    "/api/transcription/game/vocals",
+                    import.meta.url,
+                );
+                url.searchParams.set("id", id);
+                const response = await fetchImpl(url.href, {
+                    signal: AbortSignal.timeout(60_000),
+                });
+                const size = Number(response.headers.get("content-length"));
+                if (
+                    response.ok &&
+                    size > 44 &&
+                    size <= MAX_VOCAL_BYTES &&
+                    response.headers.get("content-type") === "audio/wav"
+                ) {
+                    const audio = await response.blob();
+                    if (audio.size === size && audio.type === "audio/wav")
+                        blob = audio;
+                } else {
+                    await response.body?.cancel();
+                }
+            } catch {
+                // Preview availability is independent of transcription.
+            }
+        }
+        postMessage(encodeVocalStem({ jobId: start.jobId, blob }));
+    }
     const consume = (line) => {
         if (!line.trim()) return;
         if (terminal)
@@ -81,6 +118,12 @@ export async function transcribeGame(
                       }
                     : event;
             postMessage(encodeStatus({ ...normalized, jobId: start.jobId }));
+        } else if (
+            event.type === "vocal-stem" &&
+            start.engine === "game-separated" &&
+            !stemTransfer
+        ) {
+            stemTransfer = downloadStem(event.id);
         } else if (event.type === "result") {
             terminal = true;
             result = encodeResult({ jobId: start.jobId, notes: event.notes });
@@ -116,7 +159,11 @@ export async function transcribeGame(
                 "protocol",
                 "GAME stream ended without a result",
             );
+        await stemTransfer;
         postMessage(result);
+    } catch (error) {
+        await stemTransfer;
+        throw error;
     } finally {
         await reader.cancel().catch(() => {});
         reader.releaseLock();

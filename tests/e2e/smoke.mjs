@@ -356,7 +356,15 @@ try {
         ),
         4,
     );
+    assert.deepEqual(
+        await evaluate(`[...document.querySelectorAll('.transcribe-engine-guide dd')]
+            .map((node) => Boolean(node.textContent.trim()))`),
+        [true, true, true],
+    );
     await evaluate(`(() => {
+        const engine = document.getElementById("transcribe-engine");
+        engine.value = "basic-pitch";
+        engine.dispatchEvent(new Event("change"));
         window.__workerCount = 0;
         window.__workerPosts = [];
         window.__workerMessages = [];
@@ -758,17 +766,29 @@ try {
         document.getElementById('teach-apply-map').click();
     })()`);
     await wait(200);
-    await send("Emulation.setDeviceMetricsOverride", {
-        width: 390,
-        height: 844,
-        deviceScaleFactor: 1,
-        mobile: true,
-    });
-    await wait(100);
-    assert.equal(
-        await evaluate(`document.documentElement.scrollWidth > innerWidth`),
-        false,
-    );
+    for (const width of [320, 390]) {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: 844,
+            deviceScaleFactor: 1,
+            mobile: true,
+        });
+        assert.equal(
+            await evaluate(`document.documentElement.scrollWidth > innerWidth`),
+            false,
+        );
+        assert.ok(
+            await evaluate(`(() => {
+            const rect = (id) => document.getElementById("transcribe-" + id).getBoundingClientRect();
+            const origin = rect("origin"), fit = rect("auto-fit"), reset = rect("original-key");
+            const separate = (a, b) => b.left - a.right >= 8 || b.top - a.bottom >= 8;
+            return separate(origin, fit) && separate(fit, reset) &&
+                [origin, fit, reset, rect("run"), rect("fetch")].every(bounds =>
+                    bounds.left >= 0 && bounds.right <= innerWidth && bounds.height >= 40);
+        })()`),
+            `Transcription buttons fit and keep their gaps at ${width}px`,
+        );
+    }
     await writeFile(
         ".test-artifacts/transcribe-mobile.png",
         Buffer.from(

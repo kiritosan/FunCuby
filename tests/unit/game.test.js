@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { writeFileSync } from "node:fs";
 import http from "node:http";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
@@ -117,7 +118,7 @@ test("GAME stream handles fragmented JSON and only settles after a valid EOF", a
     );
 });
 
-async function service(t, { hold = false } = {}) {
+async function service(t, { hold = false, vocal = null } = {}) {
     const children = [];
     const spawnImpl = (_command, args) => {
         const child = new EventEmitter();
@@ -151,6 +152,15 @@ async function service(t, { hold = false } = {}) {
                         backend: "cpu",
                     }) + "\n",
                 );
+                if (vocal && args.includes("--vocal-output")) {
+                    writeFileSync(
+                        args[args.indexOf("--vocal-output") + 1],
+                        vocal,
+                    );
+                    child.stdout.write(
+                        '{"type":"vocal-stem","available":true}\n',
+                    );
+                }
                 if (!hold) child.finish({ type: "result", notes });
             }
         });
@@ -189,6 +199,31 @@ async function service(t, { hold = false } = {}) {
         });
     return { base, request, children };
 }
+
+test("separated jobs deliver the vocal file through a one-use local URL", async (t) => {
+    const vocal = Buffer.alloc(48, 37);
+    const { base } = await service(t, { vocal });
+    const result = await fetch(base + "/api/transcription/game?separate=1", {
+        method: "POST",
+        headers: { Origin: base, "Content-Type": "application/octet-stream" },
+        body: new Float32Array([0.1, 0.2]),
+    });
+    assert.equal(result.status, 200);
+    const events = (await result.text()).trim().split("\n").map(JSON.parse);
+    const stem = events.find((event) => event.type === "vocal-stem");
+    assert.equal(events.at(-1).type, "result");
+    const url = base + "/api/transcription/game/vocals?id=" + stem.id;
+    const denied = await fetch(url, {
+        headers: { "Sec-Fetch-Site": "cross-site" },
+    });
+    assert.equal(denied.status, 403);
+    const response = await fetch(url);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "audio/wav");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), vocal);
+    assert.equal((await fetch(url)).status, 404);
+});
 
 test("local GAME endpoint rejects foreign origins, hosts, types and languages", async (t) => {
     const s = await service(t);
