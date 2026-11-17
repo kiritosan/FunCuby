@@ -12,7 +12,7 @@ The player loads only needed sample pitches, caches decoded samples per audio
 context, and schedules a short horizon with a bounded live voice count.
 Stop/source change/pagehide abort loading and disconnect scheduled sources.
 
-## Optional local GAME inference
+## Optional local GAME and vocal separation
 
 The browser Basic Pitch path remains the default and uses CPU. The experimental
 GAME 1.0.3 small ONNX path targets **singing**, not general instrumental mixtures.
@@ -28,6 +28,7 @@ python -m venv .tools/game-env
 .tools/game-env/Scripts/python.exe -m pip install -r requirements-game.txt
 $env:FUNCUBY_GAME_PYTHON = "$PWD/.tools/game-env/Scripts/python.exe"
 npm run setup:game
+npm run setup:separation
 npm start
 ```
 
@@ -40,19 +41,34 @@ resuming, and verifies SHA-256 before extraction:
 
 Model source: https://github.com/openvpi/GAME/releases/tag/v1.0.3
 
-Model weights are **CC BY-NC-SA 4.0**, not MIT. The upstream implementation is
-MIT. See `THIRD_PARTY_NOTICES.md` and the reproduced license texts before
-redistributing weights or modified models.
+GAME weights use **CC BY-NC-SA 4.0** and the upstream implementation uses MIT.
+`setup:separation` is optional. It downloads and verifies the pinned UVR
+MDX-Net Voc FT ONNX model for CPU vocal separation. See
+[third-party notices](../THIRD_PARTY_NOTICES.md) for model sources and licenses.
 
 ## Usage and comparison
 
 1. Import audio as before. Start with a familiar 20-30 second vocal phrase.
-2. Select local GAME and the singing language, then start transcription.
-3. GAME initially selects working-melody/original-timing piano playback. Judge this before
-   judging a reduced pocket-keyboard arrangement.
-4. Run the lightweight mode on the same clip if desired. Switching between
-   completed modes restores their independent captures without re-inference.
-5. Change volume freely; it does not rerun a model or modify exported notes.
+2. For a mixed song with a lead vocal, select **Vocal separation + GAME** and
+   the singing language. **GAME** runs directly on the mix and skips the
+   separation pass. For instrumental clips, start with **Browser lightweight**
+   (Basic Pitch).
+3. Both GAME modes initially select working-melody piano playback at detected
+   note timings. Listen to the same phrase in the source and the draft before
+   comparing the simplified versions.
+4. Switching between completed modes restores their independent captures
+   without re-inference.
+
+After a new capture, the page estimates tempo and beat origin from the note
+onsets and recommends a semitone shift using the detected pitch classes and
+the calibrated first key. The suggested fit weights notes by duration and
+velocity. **Auto Tempo + Main-Key Fit** reapplies the estimates to the current
+working melody. If tempo confidence is low, the current BPM and beat origin
+are kept. **Original Key** resets the transpose to zero and keeps the
+current rhythm settings. The BPM, beat origin, transpose and pitch bounds are
+editable. The simplified levels use the beat grid and pocket keyboard range.
+In dense polyphony, they trace a lead line before choosing beat anchors and
+folding octaves. The starter level uses the 15 main keys.
 
 Changing source or clip clears the corresponding in-memory captures. The most
 recent successfully imported source, completed mode captures, clip, arrangement
@@ -77,12 +93,10 @@ backups. This cannot retroactively recover data lost before persistence existed.
 Run `npm run test:e2e:storage` for real IndexedDB, refresh, browser/server restart,
 write-failure rollback, stale-tab, interrupted-restore and deletion checks.
 
-GAME input is 44.1 kHz mono float32. The browser retains the decoded source and
-resamples for the selected model. New URL imports now supply a **44.1 kHz stereo
-16-bit FLAC working master**, rather than early 22.05 kHz downmixing. This is
-lossless encoding of the converted PCM, not a claim that a platform's compressed
-source is an original lossless studio master. Existing saved sources are not
-silently fetched again or upgraded. Source separation has not been added.
+Direct GAME input is 44.1 kHz mono float32. The separation path uses 44.1 kHz
+stereo float32, runs UVR first, then downmixes the vocal stem for GAME. New URL
+imports supply a **44.1 kHz stereo 16-bit FLAC working master** that preserves
+the channels from the conversion. Previously saved audio is reused as stored.
 
 ## Phrase review and non-destructive editing
 
@@ -127,8 +141,8 @@ boundary clipping, rests, cancellation and skipped scheduling cycles.
 ## Execution and safety boundaries
 
 - A shared job controller owns preparation, progress, cancellation and stale-job
-  isolation for both engines. Existing Basic Pitch start envelopes are unchanged;
-  explicit GAME envelopes select 44.1 kHz and a validated language.
+  isolation for all modes. Both GAME envelopes select 44.1 kHz and a validated
+  language. Separation and GAME count toward the same progress total.
 - GAME processes 8-second cores with one second of context on each side.
   Progress counts completed cores, not speculative inference percentages.
 - Only boundary-clipped continuations can merge across cores. Repeated notes
@@ -152,24 +166,25 @@ about 33 seconds; GAME returned 58 notes in about 8 seconds. These are operation
 observations, **not a transcription accuracy score or a general speed claim**.
 The original PCM CLI run and browser decode can differ slightly in segmentation.
 
-A 219-second clip of the same recording also completed all 28 GAME cores,
-returning 423 notes in about 70 seconds. UI, progress, result and cached-mode
-assertions passed. Its optional screenshot timed out; this is recorded separately
-from inference acceptance. A real running ONNX job was also cancelled and a fresh
-request completed successfully, in addition to the mocked process-lifecycle tests.
+On a 219-second stereo PCM clip of the same recording, direct GAME completed
+28 inference windows and returned 423 notes in about 63 seconds. UVR + GAME
+completed 39 separation windows and 28 inference windows and returned 469
+notes in about 257 seconds. Both browser runs checked window progress and cached
+mode switching. The separated run also checked that auto-fit set 136 BPM,
+an 18 ms beat origin and a +5 semitone shift, that Original Key preserved manual
+rhythm settings, and that the result and settings survived a reload.
 
-No manually checked reference melody is available yet. Fewer notes, smoother
-contours and a better piano sound do not prove that the lead melody is correct.
-Lead/backing vocals, choirs, instrumental interludes and octave errors remain
-important failure cases. Existing draft BPM, highest-voice fallback, small-key
-omission and range-folding rules still constrain pocket-keyboard arrangements.
-Further separation/model work should follow listening to the faithful melody,
-not assume that another large dependency will improve it.
+Musical accuracy remains unmeasured because the project lacks a manually checked
+reference melody. Lead and backing vocals can still be confused, and choirs,
+instrumental interludes and octave errors remain important failure cases. Tempo
+may be interpreted at half or double speed. Starter quantization and main-key
+selection can omit short notes or chromatic notes.
 
 Reproduce the short UI acceptance runs against a running local server:
 
 ```text
 node tests/e2e/transcription-long-run.mjs --game --clip=PATH_TO_24_SECOND_WAV --seconds=24
+node tests/e2e/transcription-long-run.mjs --game-separated --clip=PATH_TO_24_SECOND_STEREO_WAV --seconds=24
 node tests/e2e/transcription-long-run.mjs --clip=PATH_TO_24_SECOND_WAV --seconds=24
 ```
 

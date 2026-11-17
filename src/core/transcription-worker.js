@@ -43,7 +43,7 @@ async function runJob(data) {
         const start = decodeStart(data);
         const jobId = start.jobId;
         self.postMessage(encodeStatus({ jobId, stage: "initializing" }));
-        if (start.engine === "game") {
+        if (start.engine === "game" || start.engine === "game-separated") {
             await transcribeGame(start);
             return;
         }

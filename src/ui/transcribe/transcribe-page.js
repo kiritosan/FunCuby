@@ -12,7 +12,6 @@ import { TranscriptionJob } from "../../core/transcription/job.js";
 import {
     MAX_AUDIO_SECONDS,
     MAX_FILE_BYTES,
-    SAMPLE_RATE,
     TRANSCRIPTION_ENGINES,
 } from "../../core/transcription/config.js";
 import { numberedKey, numberedPitch } from "../../core/teaching/score.js";
@@ -22,6 +21,7 @@ import { formatClock, formatDecimal } from "../format.js";
 import { createAudition } from "./audition.js";
 import { TranscriptionStore } from "../../core/storage/transcription-store.js";
 import { workingNotes } from "../../core/transcription/melody-edit.js";
+import { analyzeMelody } from "../../core/transcription/musical-analysis.js";
 import { createMelodyEditor } from "./melody-editor.js";
 
 const LEVELS = ["starter", "melody", "fuller", "original"];
@@ -69,7 +69,8 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
     let sourceId = null,
         storageRevision = 0,
         restoreAllowed = true,
-        pageGone = false;
+        pageGone = false,
+        userEditedArrangement = false;
     const task = new TranscriptionJob({
         // reportErrors defers the callback, so read the live snapshot here
         // instead of rendering a queued stale one. While a job is working,
@@ -223,6 +224,7 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
         const volume = Number(byId("transcribe-audition-volume").value);
         audition.setVolume(volume / 100);
         byId("transcribe-audition-volume-value").value = `${volume}%`;
+        userEditedArrangement = true;
         selectEngine(false);
         storageStatus("restored");
     }
@@ -309,19 +311,38 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
     }
 
     function resetResults(clearCaptures = true) {
-        if (clearCaptures) captures.clear();
+        if (clearCaptures) {
+            captures.clear();
+            userEditedArrangement = false;
+        }
         melodyNotes = null;
         arrangements = null;
         selected = null;
         byId("transcribe-results").hidden = true;
         byId("transcribe-preview").replaceChildren();
         byId("transcribe-stats").textContent = "";
+        byId("transcribe-analysis").textContent = "";
         showWarning("");
         editor.render(null);
     }
 
     function captureKey(engine, language) {
-        return engine === "game" ? `${engine}:${language}` : "basic-pitch";
+        return engine === "basic-pitch"
+            ? "basic-pitch"
+            : `${engine}:${language}`;
+    }
+
+    function applyMusicalFit() {
+        if (!melodyNotes?.length) return;
+        const analysis = analyzeMelody(melodyNotes, {
+            clipMs,
+            firstNote: firstNote(),
+        });
+        if (analysis.confidence >= 0.2) {
+            byId("transcribe-bpm").value = String(analysis.bpm);
+            byId("transcribe-origin").value = String(analysis.originMs);
+        }
+        byId("transcribe-transpose").value = String(analysis.whiteKeyTranspose);
     }
 
     function selectEngine(persist = true) {
@@ -376,7 +397,7 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
         byId("transcribe-language").disabled =
             phase !== "idle" ||
             importing ||
-            byId("transcribe-engine").value !== "game";
+            byId("transcribe-engine").value === "basic-pitch";
         byId("transcribe-run").disabled =
             !decoded || phase !== "idle" || importing;
         byId("transcribe-cancel").hidden = phase !== "working";
@@ -646,6 +667,10 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
                 return t("transcribe.status.loading");
             case "warming":
                 return t("transcribe.status.warming");
+            case "separating":
+                return t("transcribe.status.separating", {
+                    percent: formatDecimal((progress ?? 0) * 100, 1),
+                });
             case "transcribing":
                 return t("transcribe.status.working", {
                     percent: formatDecimal((progress ?? 0) * 100, 1),
@@ -741,8 +766,11 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
         const actualSeconds = Math.min(length, decoded.duration - start);
         const engine = byId("transcribe-engine").value;
         const language = byId("transcribe-language").value;
-        const sampleRate =
-            TRANSCRIPTION_ENGINES[engine]?.sampleRate ?? SAMPLE_RATE;
+        const engineSpec =
+            TRANSCRIPTION_ENGINES[engine] ??
+            TRANSCRIPTION_ENGINES["basic-pitch"];
+        const sampleRate = engineSpec.sampleRate;
+        const channels = engineSpec.channels;
         if (
             currentCapture()?.editedNotes !== undefined &&
             !window.confirm(t("transcribe.editor.confirmRerun"))
@@ -764,7 +792,7 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
             const notes = await task.start(
                 async (signal) => {
                     const offline = new OfflineAudioContext(
-                        1,
+                        channels,
                         Math.ceil(actualSeconds * sampleRate),
                         sampleRate,
                     );
@@ -774,16 +802,27 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
                     source.start(0, start, actualSeconds);
                     const rendered = await offline.startRendering();
                     assertNotAborted(signal);
-                    const samples = Float32Array.from(
-                        rendered.getChannelData(0),
-                    );
-                    clipMs = (samples.length / sampleRate) * 1000;
+                    const frameCount = rendered.length;
+                    let samples;
+                    if (channels === 2) {
+                        const left = rendered.getChannelData(0);
+                        const right =
+                            rendered.numberOfChannels > 1
+                                ? rendered.getChannelData(1)
+                                : left;
+                        samples = new Float32Array(frameCount * 2);
+                        samples.set(left, 0);
+                        samples.set(right, frameCount);
+                    } else {
+                        samples = Float32Array.from(rendered.getChannelData(0));
+                    }
+                    clipMs = (frameCount / sampleRate) * 1000;
                     if (samples.every((sample) => sample === 0))
                         throw new TranscriptionError("silence");
                     const origin = byId("transcribe-origin");
                     origin.max = String(Math.round(clipMs));
                     if (Number(origin.value) > clipMs) origin.value = "0";
-                    if (engine === "game") return samples;
+                    if (engine !== "basic-pitch") return samples;
                     // Missing vendor files must fail loudly here, not hang inside the worker.
                     const runtimeUrl = new URL(
                         "../../../vendor/transcription-runtime.js",
@@ -823,7 +862,8 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
                 clipMs,
                 clipStartMs: start * 1000,
             });
-            if (engine === "game")
+            if (!userEditedArrangement) applyMusicalFit();
+            if (engine !== "basic-pitch")
                 byId("transcribe-audition-mode").value = "original";
             phase = "idle";
             byId("transcribe-results").hidden = false;
@@ -920,14 +960,40 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
             showWarning(
                 out > 0 ? t("transcribe.outOfRange", { count: out }) : "",
             );
+            renderAnalysis();
             renderLevelCounts();
             renderStats();
             renderPreview();
             updateActions();
             return;
         }
+        byId("transcribe-analysis").textContent = "";
         if (error) return renderResultsError(error);
         updateActions();
+    }
+
+    function renderAnalysis() {
+        if (!melodyNotes?.length) {
+            byId("transcribe-analysis").textContent = "";
+            return;
+        }
+        const info = analyzeMelody(melodyNotes, {
+            clipMs,
+            firstNote: firstNote(),
+        });
+        const keyLabel = `${info.majorName} / ${info.minorName}m`;
+        const shiftText =
+            info.whiteKeyTranspose > 0
+                ? `+${info.whiteKeyTranspose}`
+                : String(info.whiteKeyTranspose);
+        byId("transcribe-analysis").textContent = t("transcribe.analysis", {
+            bpm: info.bpm,
+            origin: info.originMs,
+            key: keyLabel,
+            rawFit: Math.round(info.rawMainKeyRatio * 100),
+            transpose: shiftText,
+            bestFit: Math.round(info.transposedMainKeyRatio * 100),
+        });
     }
 
     function renderResultsError(error) {
@@ -1122,8 +1188,13 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
         .catch(() => null)
         .then((status) => {
             byId("transcribe-engine-game").disabled = !status?.available;
+            byId("transcribe-engine-game-separated").disabled = !(
+                status?.available && status?.separationAvailable
+            );
             const key = status?.available
-                ? "transcribe.engineReady"
+                ? status?.separationAvailable
+                    ? "transcribe.engineSeparatedReady"
+                    : "transcribe.engineReady"
                 : "transcribe.engineMissing";
             byId("transcribe-engine-status").dataset.i18n = key;
             byId("transcribe-engine-status").textContent = t(key);
@@ -1193,9 +1264,31 @@ export function initTranscribePage({ notice, getOffset, loadPracticeFile }) {
         "transcribe-max-pitch",
     ])
         byId(id).addEventListener("change", () => {
+            if (
+                [
+                    "transcribe-bpm",
+                    "transcribe-origin",
+                    "transcribe-transpose",
+                ].includes(id)
+            )
+                userEditedArrangement = true;
             renderResults();
             saveState();
         });
+    byId("transcribe-auto-fit").addEventListener("click", () => {
+        if (!melodyNotes?.length) return;
+        userEditedArrangement = false;
+        applyMusicalFit();
+        renderResults();
+        saveState();
+    });
+    byId("transcribe-original-key").addEventListener("click", () => {
+        if (!melodyNotes?.length) return;
+        userEditedArrangement = true;
+        byId("transcribe-transpose").value = "0";
+        renderResults();
+        saveState();
+    });
     for (const id of SAVED_FIELDS.filter(
         (id) =>
             ![

@@ -8,9 +8,10 @@ import {
 } from "../src/core/transcription/config.js";
 import { isAllowedHost } from "./audio-import.js";
 
-const MAX_BYTES = 44100 * MAX_AUDIO_SECONDS * 4;
+const MAX_MONO_BYTES = 44100 * MAX_AUDIO_SECONDS * 4;
+const MAX_STEREO_BYTES = MAX_MONO_BYTES * 2;
 const MAX_STDOUT = 8 * 1024 * 1024;
-const JOB_TIMEOUT = 20 * 60 * 1000;
+const JOB_TIMEOUT = 25 * 60 * 1000;
 
 class RequestError extends Error {
     constructor(status, code, message) {
@@ -174,13 +175,27 @@ export function createGameTranscription({
                     "bad-request",
                     "Unsupported language",
                 );
+            const separateParam = url.searchParams.get("separate");
+            if (
+                separateParam !== null &&
+                separateParam !== "0" &&
+                separateParam !== "1"
+            )
+                throw new RequestError(
+                    400,
+                    "bad-request",
+                    "Unsupported separation flag",
+                );
+            const separate = separateParam === "1";
+            const frameAlign = separate ? 8 : 4;
+            const maxBytes = separate ? MAX_STEREO_BYTES : MAX_MONO_BYTES;
             const length = req.headers["content-length"];
             if (
                 length !== undefined &&
                 (!/^\d+$/.test(length) ||
-                    Number(length) > MAX_BYTES ||
-                    Number(length) < 4 ||
-                    Number(length) % 4)
+                    Number(length) > maxBytes ||
+                    Number(length) < frameAlign ||
+                    Number(length) % frameAlign)
             )
                 throw new RequestError(413, "too-large", "Invalid audio size");
             if (active)
@@ -199,14 +214,14 @@ export function createGameTranscription({
             let bytes = 0;
             const uploadTimer = setTimeout(
                 () => req.destroy(new Error("Upload timed out")),
-                45000,
+                90000,
             );
             try {
                 for await (const chunk of req.iterator({
                     destroyOnReturn: false,
                 })) {
                     bytes += chunk.length;
-                    if (bytes > MAX_BYTES)
+                    if (bytes > maxBytes)
                         throw new RequestError(
                             413,
                             "too-large",
@@ -218,7 +233,7 @@ export function createGameTranscription({
                 clearTimeout(uploadTimer);
                 await file.close();
             }
-            if (!bytes || bytes % 4)
+            if (!bytes || bytes % frameAlign)
                 throw new RequestError(
                     400,
                     "bad-request",
@@ -249,6 +264,7 @@ export function createGameTranscription({
                         "--raw-f32",
                         "--language",
                         language,
+                        ...(separate ? ["--separate"] : []),
                     ]);
                     timeout = setTimeout(
                         () =>

@@ -31,7 +31,9 @@ Open <http://localhost:5173> and connect your keyboard on the Device page.
 
 For Bluetooth connections, use a browser that supports Web Bluetooth, such as Chrome, and open the site over localhost or HTTPS.
 
-**Transcribe** turns an audio file on this device into a practice score. Pick a file (MP3/WAV and other browser-decodable formats, up to 50 MB and 10 minutes) — the whole source is used by default, or trim a 1–600 s clip manually — and the app detects notes locally with Spotify Basic Pitch in a web worker — nothing is uploaded. Long clips take longer and can be cancelled at any time. Choose one of four arrangements (starter, melody, fuller, original), audition the result, download MIDI, or send it straight to Practice. BPM, transpose, beat offset and pitch range are editable assumptions, not detected values; the picker keeps the highest-pitched voice as a heuristic and is not reliable vocal separation, so complex mixes may need a cleaner source or manual checking.
+**Transcribe** turns a local audio file into a practice score. Import MP3, WAV or another browser-decodable format (up to 50 MB and 10 minutes), then use the whole source or trim a 1–600 s clip. Basic Pitch is the default browser CPU mode. The local Node server also supports CPU-only GAME for singing and UVR vocal separation followed by GAME for mixed songs. Both modes require Python and model setup. See [local model setup](docs/melody-quality.md#optional-local-game-and-vocal-separation).
+
+After transcription, **Auto Tempo + Main-Key Fit** estimates BPM and beat origin and suggests a transpose for the keyboard's main keys. **Original Key** sets transpose to zero. You can edit these settings, audition four arrangement levels, download MIDI, or open a score in Practice. Inference runs entirely on your device and can be cancelled.
 
 You can also paste a public Bilibili or YouTube video link and click **Fetch audio**. The local server downloads and normalizes the audio with yt-dlp + ffmpeg, then hands it to the same file pipeline — transcription still only runs when you click Start. This needs internet access, the local `npm start` server, and yt-dlp plus ffmpeg/ffprobe (see [docs/url-import.md](docs/url-import.md) for setup). It uses no cookies, no login, and no DRM or access-control bypass — only fetch content you are allowed to download.
 
@@ -83,7 +85,9 @@ npm start
 
 蓝牙连接请使用支持蓝牙的浏览器，如 chrome ，通过 localhost 或 HTTPS 访问。
 
-**扒谱**把本机音频文件转成练习谱。选择文件（MP3/WAV 等浏览器可解码格式，最大 50 MB、10 分钟）——默认使用整首音频，也可手动裁剪 1–600 秒片段——应用在 Web Worker 中用 Spotify Basic Pitch 本地识别音符——不上传任何内容。长片段耗时更长，可随时取消。可选入门、基础、进阶、原始四种改编，试听结果、下载 MIDI，或直接送去练习。BPM、移调、节拍原点和音高范围都是可修改的假设值，并非自动识别；系统取最高声部作为启发式旋律，并非可靠的人声分离，复杂混音可能需要更干净的音源或人工检查。
+**扒谱**把本机音频文件转成练习谱。支持 MP3、WAV 等浏览器可解码的格式，最大 50 MB、10 分钟。可以使用整首音频，也可以裁剪 1–600 秒片段。默认通过浏览器 CPU 运行 Basic Pitch。用本地 Node 服务运行时，也可以选 GAME 直扒人声，或先用 UVR 分离人声再交给 GAME，适合伴奏较强的歌曲。两个模式都需要安装 Python 依赖和模型。见[本机模型安装说明](docs/melody-quality.md#optional-local-game-and-vocal-separation)。
+
+转写完成后，可用「自动节拍 + 全大键适配」估算 BPM、节拍原点和适合大键的移调量。「还原原调」将移调设回 0。你也可以手动调整参数，试听入门、基础、进阶、原始四档谱，下载 MIDI 或直接跟练。推理全程在本机运行，可随时取消。
 
 也可以在「扒谱」中粘贴公开的 B 站或 YouTube 视频链接并点击「获取音频」。本地服务器会通过 yt-dlp + ffmpeg 下载并规范化音频，然后走与文件导入相同的流程——识别仍需手动点击开始。该功能需要联网、本地 `npm start` 服务，以及 yt-dlp 和 ffmpeg/ffprobe（安装方法见 [docs/url-import.md](docs/url-import.md)）。不使用 Cookie、登录，也不绕过 DRM 或访问控制——请仅下载你有权获取的内容。
 

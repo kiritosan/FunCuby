@@ -13,10 +13,12 @@ export async function transcribeGame(
     } = {},
 ) {
     let response;
+    const separateQuery =
+        start.engine === "game-separated" ? "&separate=1" : "";
     try {
         response = await fetchImpl(
             new URL(
-                `/api/transcription/game?language=${start.language}`,
+                `/api/transcription/game?language=${start.language}${separateQuery}`,
                 import.meta.url,
             ).href,
             {
@@ -70,7 +72,15 @@ export async function transcribeGame(
             throw new TranscriptionError("protocol", "Malformed GAME JSON");
         }
         if (event.type === "status") {
-            postMessage(encodeStatus({ ...event, jobId: start.jobId }));
+            const normalized =
+                event.completedWindows !== undefined &&
+                event.totalWindows !== undefined
+                    ? {
+                          ...event,
+                          progress: event.completedWindows / event.totalWindows,
+                      }
+                    : event;
+            postMessage(encodeStatus({ ...normalized, jobId: start.jobId }));
         } else if (event.type === "result") {
             terminal = true;
             result = encodeResult({ jobId: start.jobId, notes: event.notes });

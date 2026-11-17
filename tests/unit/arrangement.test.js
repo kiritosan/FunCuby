@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
     arrangeTranscription,
+    extractLeadMelody,
     transcriptionMidi,
 } from "../../src/core/arrangement.js";
 import { parseMidiFile } from "../../src/core/midi/midi-file.js";
@@ -347,4 +348,42 @@ test("beat origin offset accepts 600000 ms, drops earlier notes, shifts later on
         () => arrange([note(72, 0, 500)], { originMs: 600_001 }),
         RangeError,
     );
+});
+
+test("extractLeadMelody suppresses octave overtone ghosts and bass rumble in dense polyphony", () => {
+    const melodyLine = [64, 67, 69, 67, 64, 67, 71, 72, 71, 69, 67, 64];
+    const mixed = [];
+    for (let i = 0; i < melodyLine.length; i++) {
+        const at = i * 250;
+        const leadPitch = melodyLine[i];
+        // Deep bass + inner accompaniment + lead voice + quieter octave harmonic
+        mixed.push(note(40, at, 220, 95));
+        mixed.push(note(leadPitch - 5, at + 10, 200, 72));
+        mixed.push(note(leadPitch, at, 230, 98));
+        mixed.push(note(leadPitch + 12, at + 5, 160, 78));
+    }
+    const tracked = extractLeadMelody(mixed);
+    assert.deepEqual(
+        tracked.map((n) => n.note),
+        melodyLine,
+    );
+    const arranged = arrange(mixed, { level: "melody", bpm: 120 });
+    assert.deepEqual(
+        arranged.notes.map((n) => n.note),
+        melodyLine,
+    );
+});
+
+test("starter prefers a main-key beat anchor over an unplayable chromatic grace note", () => {
+    // Beat 0 contains a playable main-key E4 (64) on the beat and an off-beat F#4 (66)
+    // that rounds to the same quarter-note grid slot.
+    const input = [note(64, 0, 320, 90), note(66, 180, 200, 95)];
+    const starter = arrange(input, {
+        level: "starter",
+        bpm: 120,
+        firstNote: 60,
+    });
+    assert.equal(starter.notes.length, 1);
+    assert.equal(starter.notes[0].note % 12, 4);
+    assert.equal(starter.stats.omittedMainKeys, 0);
 });

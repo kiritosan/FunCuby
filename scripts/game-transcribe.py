@@ -1,5 +1,7 @@
-"""CPU inference for official GAME 1.0.3 ONNX exports; no PyTorch required."""
+"""CPU inference for official GAME 1.0.3 ONNX exports, with optional UVR MDX vocal separation."""
 import argparse
+import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -33,25 +35,81 @@ def find_model(directory):
     raise ValueError("GAME model not installed. Run npm run setup:game.")
 
 
-def load_audio(path, np, raw=False):
+def load_mdx_module():
+    spec = importlib.util.spec_from_file_location(
+        "mdx_separation", Path(__file__).with_name("mdx-separation.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_separation_model(path):
+    model = Path(path)
+    if not model.is_file():
+        return False
+    mdx = load_mdx_module()
+    if model.stat().st_size != mdx.MODEL_BYTES:
+        return False
+    return hashlib.sha256(model.read_bytes()).hexdigest() == mdx.MODEL_SHA256
+
+
+def load_audio(path, np, raw=False, stereo=False):
     if raw:
         size = Path(path).stat().st_size
-        if size < 4 or size % 4 or size > 44100 * 600 * 4:
-            raise ValueError("Invalid 44100 Hz mono float32 audio")
+        channels = 2 if stereo else 1
+        frame_bytes = 4 * channels
+        if size < frame_bytes or size % frame_bytes or size > 44100 * 600 * frame_bytes:
+            raise ValueError(f"Invalid 44100 Hz {channels}-channel float32 audio")
         samples = np.fromfile(path, dtype="<f4")
         if not np.isfinite(samples).all():
             raise ValueError("Non-finite audio samples")
-        return samples
+        return samples.reshape(2, -1) if stereo else samples
     with wave.open(str(path), "rb") as source:
-        if (source.getframerate(), source.getnchannels(), source.getsampwidth()) != (44100, 1, 2):
-            raise ValueError("Expected mono 44100 Hz 16-bit PCM WAV")
+        channels = source.getnchannels()
+        expected = (2,) if stereo else (1,)
+        if (source.getframerate(), source.getsampwidth()) != (44100, 2) or channels not in expected:
+            raise ValueError(f"Expected {'stereo' if stereo else 'mono'} 44100 Hz 16-bit PCM WAV")
         frames = source.getnframes()
         if not 1 <= frames <= 44100 * 600:
             raise ValueError("Expected audio up to 600 seconds")
         data = source.readframes(frames)
-        if len(data) != frames * 2:
+        if len(data) != frames * 2 * channels:
             raise ValueError("Truncated WAV data")
-    return np.frombuffer(data, dtype="<i2").astype(np.float32) / 32768.0
+    pcm = np.frombuffer(data, dtype="<i2").astype(np.float32) / 32768.0
+    return pcm.reshape(-1, 2).T if stereo else pcm
+
+
+def clean_vocal_glitches(notes):
+    """Absorb tiny (<85 ms) isolated 1-semitone consonant/breath pitch scoops."""
+    if len(notes) < 3:
+        return notes
+    cleaned = []
+    for index, current in enumerate(notes):
+        previous = cleaned[-1] if cleaned else None
+        nxt = notes[index + 1] if index + 1 < len(notes) else None
+        if (
+            current["durationMs"] < 85
+            and previous is not None
+            and nxt is not None
+            and current["timeMs"] - (previous["timeMs"] + previous["durationMs"]) < 40
+            and nxt["timeMs"] - (current["timeMs"] + current["durationMs"]) < 40
+            and previous["durationMs"] >= 140
+            and nxt["durationMs"] >= 140
+            and current["note"] != previous["note"]
+            and current["note"] != nxt["note"]
+            and (
+                abs(current["note"] - previous["note"]) == 1
+                or abs(current["note"] - nxt["note"]) == 1
+            )
+        ):
+            previous["durationMs"] = max(
+                previous["durationMs"],
+                (current["timeMs"] + current["durationMs"]) - previous["timeMs"],
+            )
+            continue
+        cleaned.append(dict(current))
+    return cleaned
 
 
 class GameModel:
@@ -115,7 +173,6 @@ class GameModel:
         regions = self.run("bd2dur", {
             "boundaries": boundaries, "maskT": encoded["maskT"],
         })
-        # Export names are checked against the actual ONNX graph, not positional outputs.
         mask = regions.get("maskN")
         if mask is None:
             mask = regions.get("mask")
@@ -178,42 +235,119 @@ class GameModel:
 
 
 def main():
+    root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser()
     parser.add_argument("--input")
-    parser.add_argument("--model-dir", default=str(Path(__file__).resolve().parent.parent / ".tools" / "game-model"))
+    parser.add_argument("--model-dir", default=str(root / ".tools" / "game-model"))
+    parser.add_argument(
+        "--separation-model",
+        default=str(root / ".tools" / "UVR-MDX-NET-Voc_FT.onnx"),
+    )
     parser.add_argument("--language", default="zh", choices=("auto", "zh", "en", "ja", "yue"))
     parser.add_argument("--steps", type=int, default=8, choices=range(1, 17))
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--raw-f32", action="store_true")
+    parser.add_argument("--separate", action="store_true")
     args = parser.parse_args()
     stage = "initializing"
     try:
         if DEPENDENCY_ERROR:
-            raise ValueError("Install numpy and onnxruntime for the selected Python interpreter: " + DEPENDENCY_ERROR)
+            raise ValueError(
+                "Install numpy and onnxruntime for the selected Python interpreter: "
+                + DEPENDENCY_ERROR
+            )
         directory = find_model(args.model_dir)
+        separation_ready = check_separation_model(args.separation_model)
         if args.check:
-            emit({"available": True, "engine": "game-1.0.3-small", "sampleRate": 44100,
-                  "numpy": np.__version__, "onnxruntime": ort.__version__})
+            emit({
+                "available": True,
+                "separationAvailable": separation_ready,
+                "engine": "game-1.0.3-small",
+                "separator": "UVR-MDX-NET-Voc_FT" if separation_ready else None,
+                "sampleRate": 44100,
+                "numpy": np.__version__,
+                "onnxruntime": ort.__version__,
+            })
             return 0
         if not args.input:
-            raise ValueError("Missing input WAV")
-        samples = load_audio(args.input, np, raw=args.raw_f32)
-        stage = "loading"
-        emit({"type": "status", "stage": stage, "backend": "cpu"})
-        model = GameModel(directory, args.language, args.steps)
-        stage = "warming"
+            raise ValueError("Missing input audio")
+        if args.separate:
+            if not separation_ready:
+                raise ValueError(
+                    "Vocal separation model is not installed. Run npm run setup:separation."
+                )
+            stereo = load_audio(args.input, np, raw=args.raw_f32, stereo=True)
+            frames = stereo.shape[1]
+            mdx = load_mdx_module()
+            sep_windows = math.ceil(frames / mdx.CORE)
+            game_windows = math.ceil(frames / (8 * 44100))
+            total_windows = sep_windows + game_windows
+            stage = "loading"
+            emit({"type": "status", "stage": stage, "backend": "cpu"})
+            separator = mdx.VocalSeparator(args.separation_model)
+            stage = "warming"
 
-        def progress(done, total):
-            emit({"type": "status", "stage": "transcribing" if done else "warming",
-                  "backend": "cpu", "completedWindows": done, "totalWindows": total,
-                  "progress": done / total})
-        notes = model.transcribe(samples, progress)
+            def sep_progress(done, _sep_total):
+                nonlocal stage
+                stage = "separating" if done else "warming"
+                emit({
+                    "type": "status",
+                    "stage": stage,
+                    "backend": "cpu",
+                    "completedWindows": done,
+                    "totalWindows": total_windows,
+                    "progress": done / total_windows,
+                })
+
+            vocals = separator.separate(stereo, sep_progress)
+            samples = vocals.mean(axis=0).astype(np.float32)
+            del vocals, stereo, separator
+            model = GameModel(directory, args.language, args.steps)
+            stage = "transcribing"
+
+            def game_progress(done, _game_total):
+                if done == 0:
+                    return
+                completed = sep_windows + done
+                emit({
+                    "type": "status",
+                    "stage": "transcribing",
+                    "backend": "cpu",
+                    "completedWindows": completed,
+                    "totalWindows": total_windows,
+                    "progress": completed / total_windows,
+                })
+
+            notes = clean_vocal_glitches(model.transcribe(samples, game_progress))
+        else:
+            samples = load_audio(args.input, np, raw=args.raw_f32, stereo=False)
+            stage = "loading"
+            emit({"type": "status", "stage": stage, "backend": "cpu"})
+            model = GameModel(directory, args.language, args.steps)
+            stage = "warming"
+
+            def progress(done, total):
+                emit({
+                    "type": "status",
+                    "stage": "transcribing" if done else "warming",
+                    "backend": "cpu",
+                    "completedWindows": done,
+                    "totalWindows": total,
+                    "progress": done / total,
+                })
+
+            notes = model.transcribe(samples, progress)
+        stage = "extracting"
         emit({"type": "status", "stage": "extracting", "backend": "cpu", "progress": 1})
         emit({"type": "result", "notes": notes})
         return 0
     except Exception as error:
-        emit({"type": "error", "code": "model" if stage == "loading" else "inference",
-              "stage": stage, "message": str(error)[:500]})
+        emit({
+            "type": "error",
+            "code": "model" if stage == "loading" else "inference",
+            "stage": stage,
+            "message": str(error)[:500],
+        })
         return 1
 
 

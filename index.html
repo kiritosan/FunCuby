@@ -618,6 +618,12 @@
                                     disabled
                                     data-i18n="transcribe.engineGame"
                                 ></option>
+                                <option
+                                    id="transcribe-engine-game-separated"
+                                    value="game-separated"
+                                    disabled
+                                    data-i18n="transcribe.engineGameSeparated"
+                                ></option>
                             </select>
                         </label>
                         <label
@@ -727,9 +733,19 @@
                                 min="-12"
                                 max="12"
                                 step="1"
-                                value="0"
-                        /></label>
+                                value="0" /></label
+                        ><button
+                            id="transcribe-auto-fit"
+                            type="button"
+                            data-i18n="transcribe.autoFit"
+                        ></button
+                        ><button
+                            id="transcribe-original-key"
+                            type="button"
+                            data-i18n="transcribe.originalKey"
+                        ></button>
                     </div>
+                    <p id="transcribe-analysis" class="muted play-hint"></p>
                     <details id="transcribe-advanced">
                         <summary data-i18n="transcribe.advanced"></summary>
                         <div class="tempo-controls">

@@ -272,3 +272,110 @@ test("disconnect cancels only the owned inference and frees the busy slot", asyn
     await next.text().catch(() => {});
     await nextReader.cancel().catch(() => {});
 });
+
+test("game-separated validates stereo frame alignment and forwards separating progress", async (t) => {
+    const separatedStart = encodeStart({
+        jobId: 7,
+        engine: "game-separated",
+        sampleRate: 44100,
+        language: "zh",
+        samples: new Float32Array(44100 * 2),
+    });
+    assert.equal(decodeStart(separatedStart).engine, "game-separated");
+    assert.throws(() =>
+        encodeStart({
+            jobId: 7,
+            engine: "game-separated",
+            sampleRate: 44100,
+            language: "zh",
+            samples: new Float32Array(44101),
+        }),
+    );
+
+    const worker = {
+        terminate() {},
+        postMessage(message) {
+            assert.equal(message.engine, "game-separated");
+            assert.equal(message.samples.length, 88200);
+            queueMicrotask(() => {
+                worker.onmessage({
+                    data: {
+                        version: message.version,
+                        type: "status",
+                        jobId: message.jobId,
+                        stage: "separating",
+                        backend: "cpu",
+                        completedWindows: 1,
+                        totalWindows: 4,
+                        progress: 0.25,
+                    },
+                });
+                worker.onmessage({
+                    data: {
+                        version: message.version,
+                        type: "status",
+                        jobId: message.jobId,
+                        stage: "transcribing",
+                        backend: "cpu",
+                        completedWindows: 4,
+                        totalWindows: 4,
+                        progress: 1,
+                    },
+                });
+                worker.onmessage({
+                    data: {
+                        version: message.version,
+                        type: "result",
+                        jobId: message.jobId,
+                        notes,
+                    },
+                });
+            });
+        },
+    };
+    const job = new TranscriptionJob({ createWorker: () => worker });
+    const stages = [];
+    const jobWithUpdates = new TranscriptionJob({
+        createWorker: () => worker,
+        onUpdate: () => stages.push(jobWithUpdates.snapshot.stage),
+    });
+    job.dispose();
+    await jobWithUpdates.start(() => new Float32Array(88200), {
+        engine: "game-separated",
+        language: "zh",
+    });
+    assert.equal(jobWithUpdates.snapshot.audioSeconds, 1);
+    assert.ok(stages.includes("separating"));
+    jobWithUpdates.dispose();
+
+    const s = await service(t);
+    const oddStereo = await fetch(
+        s.base + "/api/transcription/game?language=zh&separate=1",
+        {
+            method: "POST",
+            headers: {
+                Origin: s.base,
+                "Content-Type": "application/octet-stream",
+            },
+            body: new Float32Array([0.1]),
+        },
+    );
+    assert.equal(oddStereo.status, 413);
+    const validStereo = await fetch(
+        s.base + "/api/transcription/game?language=zh&separate=1",
+        {
+            method: "POST",
+            headers: {
+                Origin: s.base,
+                "Content-Type": "application/octet-stream",
+            },
+            body: new Float32Array([0.1, 0.2]),
+        },
+    );
+    assert.equal(validStereo.status, 200);
+    const events = (await validStereo.text())
+        .trim()
+        .split("\n")
+        .map(JSON.parse);
+    assert.equal(events.at(-1).type, "result");
+});

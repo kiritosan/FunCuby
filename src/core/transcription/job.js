@@ -15,6 +15,7 @@ const STAGE_RANK = new Map(
         "initializing",
         "loading",
         "warming",
+        "separating",
         "transcribing",
         "extracting",
     ].map((stage, index) => [stage, index]),
@@ -214,10 +215,12 @@ export class TranscriptionJob {
     // ---- run lifecycle -------------------------------------------------------
 
     #begin(engine, language) {
+        const spec = TRANSCRIPTION_ENGINES[engine];
         const run = {
             engine,
             language,
-            sampleRate: TRANSCRIPTION_ENGINES[engine].sampleRate,
+            sampleRate: spec.sampleRate,
+            channels: spec.channels,
             jobId: randomJobId(),
             controller: new AbortController(),
             worker: null,
@@ -278,14 +281,15 @@ export class TranscriptionJob {
         if (
             !(samples instanceof Float32Array) ||
             !samples.length ||
-            samples.length > run.sampleRate * MAX_AUDIO_SECONDS
+            samples.length % run.channels !== 0 ||
+            samples.length > run.sampleRate * run.channels * MAX_AUDIO_SECONDS
         )
             throw new TranscriptionError(
                 "invalid-input",
-                `Expected mono Float32 audio at ${run.sampleRate} Hz, up to 600 seconds`,
+                `Expected ${run.channels}-channel Float32 audio at ${run.sampleRate} Hz, up to 600 seconds`,
                 "preparing",
             );
-        this.#audioSeconds = samples.length / run.sampleRate;
+        this.#audioSeconds = samples.length / (run.sampleRate * run.channels);
         return samples;
     }
 

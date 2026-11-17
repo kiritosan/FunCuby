@@ -8,8 +8,9 @@ export const PROTOCOL_VERSION = 1;
 // A WebGL context is not a model compatibility check. Use validated execution.
 export const TRANSCRIPTION_BACKEND = "cpu";
 export const TRANSCRIPTION_ENGINES = Object.freeze({
-    "basic-pitch": Object.freeze({ sampleRate: SAMPLE_RATE }),
-    game: Object.freeze({ sampleRate: 44100 }),
+    "basic-pitch": Object.freeze({ sampleRate: SAMPLE_RATE, channels: 1 }),
+    game: Object.freeze({ sampleRate: 44100, channels: 1 }),
+    "game-separated": Object.freeze({ sampleRate: 44100, channels: 2 }),
 });
 export const GAME_LANGUAGES = Object.freeze(["auto", "zh", "en", "ja", "yue"]);
 

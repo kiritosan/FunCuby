@@ -1,9 +1,9 @@
 # Transcription architecture
 
-How a local audio file becomes pocket-piano practice material, entirely in the
-browser. Audio is not uploaded for inference. Runtime/model assets are served
-by the application itself; optional URL import fetches public audio through the
-local server (see `docs/url-import.md`) and feeds the same pipeline below.
+FunCuby runs Basic Pitch in the browser and GAME in an optional local Python
+process. Inference audio stays on the device. Optional URL import fetches
+public audio through the local server (see `docs/url-import.md`) and feeds
+the same pipeline.
 
 ## Pipeline
 
@@ -15,10 +15,11 @@ local server (see `docs/url-import.md`) and feeds the same pipeline below.
    arrangement validator and the URL-import server — there is no second copy.
 2. **Preparation.** `TranscriptionJob.start(prepareSamples)` initiates
    browser-side clip preparation: an `OfflineAudioContext` renders the selected
-   1–600 s window to mono `Float32Array` samples, silence is rejected, and a
-   HEAD check verifies the vendored runtime/model exist before a worker is
-   created. The stage is `preparing`; the elapsed clock starts before
-   preparation so diagnostics cover the whole job.
+   1–600 s window to `Float32Array` samples. Basic Pitch takes 22.05 kHz mono,
+   GAME takes 44.1 kHz mono, and `game-separated` takes 44.1 kHz stereo
+   (left-channel samples followed by right-channel samples). The UI rejects
+   silence and checks the Basic Pitch assets before creating its worker.
+   The elapsed clock includes preparation.
 3. **Job controller.** `src/core/transcription/job.js` owns one active job:
    the UI owns the source/clip epoch; the controller filters stale messages
    by job id _and_ worker instance, validates the prepared buffer, creates
@@ -41,11 +42,15 @@ local server (see `docs/url-import.md`) and feeds the same pipeline below.
    and `backend` values are reported as they become known. Progress is emitted only
    after a window's execution, readback and cleanup — `warming` progress 0
    means "first window running", not "done". `tensorCount` is a logical
-   TensorFlow count, not a claim about resident RAM.
-6. **Arrangement.** Detected notes are frozen once per clip; the four levels
-   (`starter`, `melody`, `fuller`, `original`) re-run the deterministic
-   `arrangeTranscription` on that capture. `originMs` is bounded by
-   `MAX_OFFSET_MS` (600 000 ms) so a full 10-minute source can be offset.
+   TensorFlow count. For both GAME modes, the worker sends PCM to the loopback
+   Node service and forwards the Python process's NDJSON events. The separated
+   mode counts UVR windows first and GAME windows second in the same progress
+   total. Cancellation disconnects the request and ends the owned Python process.
+6. **Arrangement.** Each engine/language capture retains its raw notes and
+   optional working edits. Musical analysis suggests tempo, beat origin and
+   main-key transpose. The four levels (`starter`, `melody`, `fuller`,
+   `original`) run `arrangeTranscription` on the working notes. `originMs`
+   is bounded by `MAX_OFFSET_MS` (600 000 ms).
 7. **Practice.** MIDI export and the Practice handoff reuse the existing
    paths; transcription itself never starts teaching.
 

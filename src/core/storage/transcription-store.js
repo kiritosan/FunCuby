@@ -8,6 +8,20 @@ const request = (operation) =>
         operation.onerror = () => reject(operation.error);
     });
 
+const CAPTURE_KEYS = new Set([
+    "basic-pitch",
+    "game:auto",
+    "game:zh",
+    "game:en",
+    "game:ja",
+    "game:yue",
+    "game-separated:auto",
+    "game-separated:zh",
+    "game-separated:en",
+    "game-separated:ja",
+    "game-separated:yue",
+]);
+
 export function validateTranscriptionDraft({ source, state } = {}) {
     if (!source && !state) return null;
     if (
@@ -20,21 +34,14 @@ export function validateTranscriptionDraft({ source, state } = {}) {
         source.blob.size > MAX_FILE_BYTES ||
         typeof source.name !== "string" ||
         !Array.isArray(state.captures) ||
-        state.captures.length > 6 ||
+        state.captures.length > CAPTURE_KEYS.size ||
         typeof state.settings !== "object" ||
         !state.settings
     )
         throw new Error("Invalid saved transcription");
     for (const [key, capture] of state.captures) {
         if (
-            ![
-                "basic-pitch",
-                "game:auto",
-                "game:zh",
-                "game:en",
-                "game:ja",
-                "game:yue",
-            ].includes(key) ||
+            !CAPTURE_KEYS.has(key) ||
             !Number.isFinite(capture?.clipMs) ||
             capture.clipMs <= 0 ||
             capture.clipMs > MAX_AUDIO_SECONDS * 1000 ||

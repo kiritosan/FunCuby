@@ -67,7 +67,7 @@ pip install yt-dlp          # puts yt-dlp on PATH
   conversion.
 - The private temporary directory is bounded at 110 MiB to allow both the
   downloaded source and FLAC conversion. It is removed after the owned job.
-- New imports preserve separate channels for future separation evaluation.
+- New imports preserve separate channels for the UVR + GAME transcription mode.
   Each transcription engine creates its own mono/resampled input in-browser.
   Existing saved mono sources remain usable but cannot regain stereo detail;
   reimport explicitly if a higher-quality working master is wanted.

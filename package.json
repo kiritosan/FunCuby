@@ -10,6 +10,8 @@
     "prestart": "npm run build:transcription && npm run setup:piano",
     "setup:piano": "node scripts/setup-piano.mjs",
     "setup:game": "node scripts/setup-game.mjs",
+    "setup:separation": "node scripts/setup-separation.mjs",
+    "evaluate:separation": "node scripts/evaluate-separation.mjs",
     "build:transcription": "node scripts/build-transcription.mjs",
     "test": "node --test \"tests/unit/*.test.js\"",
     "test:e2e": "node tests/e2e/smoke.mjs",

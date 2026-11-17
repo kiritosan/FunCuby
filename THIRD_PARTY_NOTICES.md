@@ -82,3 +82,15 @@ these notices apply to the distributed bundles.
 - Optional Python dependencies: NumPy 2.2.0 (BSD-3-Clause and bundled notices)
   and ONNX Runtime 1.30.0 (MIT). They are installed separately, not bundled.
   Their installed distributions contain their own license notices.
+
+## Ultimate Vocal Remover MDX-Net (`UVR-MDX-NET-Voc_FT.onnx`) — MIT
+
+- Source project: Ultimate Vocal Remover GUI (<https://github.com/Anjok07/ultimatevocalremovergui>),
+  core developers Anjok07 and aufr33; MDX-Net architecture by Kuielab & Woosung Choi
+  (<https://github.com/kuielab/mdx-net>).
+- License: MIT, reproduced in `licenses/UVR-MIT.txt` with credit to Ultimate Vocal
+  Remover (Anjok07 and aufr33).
+- Official model artifact: `UVR-MDX-NET-Voc_FT.onnx` (66,762,490 bytes),
+  SHA-256 `534b2070fcc7df514b13ef660dc8cbb328679c2374d04354a5c42bb14ecce111`.
+- Optional and gitignored under `.tools/UVR-MDX-NET-Voc_FT.onnx`, downloaded on
+  demand via `npm run setup:separation` and executed locally on CPU via ONNX Runtime.

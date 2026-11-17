@@ -12,7 +12,9 @@ const BROWSER =
     "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
 const RUN_TIMEOUT_MS = 12 * 60 * 1000;
 const gpuEnabled = process.argv.includes("--gpu-enabled");
-const game = process.argv.includes("--game");
+const separated = process.argv.includes("--game-separated");
+const game = separated || process.argv.includes("--game");
+const engine = separated ? "game-separated" : game ? "game" : "basic-pitch";
 const customClip = process.argv
     .find((arg) => arg.startsWith("--clip="))
     ?.slice(7);
@@ -22,13 +24,15 @@ const seconds = Number(
 assert.ok(seconds > 0 && seconds <= 600);
 const sampleRate = game ? 44100 : 22050;
 const artifacts = resolve(".test-artifacts");
-const artifactName = game
-    ? "transcription-game-quality"
-    : customClip
-      ? "transcription-basic-quality"
-      : gpuEnabled
-        ? "transcription-gpu-enabled-cpu-default"
-        : "transcription-long-run";
+const artifactName = separated
+    ? "transcription-game-separated"
+    : game
+      ? "transcription-game-quality"
+      : customClip
+        ? "transcription-basic-quality"
+        : gpuEnabled
+          ? "transcription-gpu-enabled-cpu-default"
+          : "transcription-long-run";
 const reportPath = resolve(artifacts, `${artifactName}.json`);
 const fixture = customClip
     ? resolve(customClip)
@@ -39,7 +43,7 @@ const report = {
     baseUrl: BASE_URL,
     fixture: customClip || "clip219.wav",
     seconds,
-    engine: game ? "game" : "basic-pitch",
+    engine,
     browserFlags: ["--headless=new", ...(gpuEnabled ? [] : ["--disable-gpu"])],
     events: [],
     errors: [],
@@ -198,13 +202,13 @@ try {
     if (game) {
         assert.ok(
             await until(
-                "!document.getElementById('transcribe-engine-game').disabled",
+                `!document.getElementById('transcribe-engine-${engine}').disabled`,
             ),
             "Local GAME environment is unavailable",
         );
         await evaluate(`(() => {
             const engine = document.getElementById("transcribe-engine");
-            engine.value = "game";
+            engine.value = ${JSON.stringify(engine)};
             engine.dispatchEvent(new Event("change"));
             const language = document.getElementById("transcribe-language");
             language.value = "zh";
@@ -319,7 +323,7 @@ try {
     const completed = report.events.filter(
         (event) =>
             event.type === "status" &&
-            event.stage === "transcribing" &&
+            ["separating", "transcribing"].includes(event.stage) &&
             event.completedWindows > 0,
     );
     const terminal = report.events.find((event) => event.type === "result");
@@ -339,6 +343,20 @@ try {
         assert.equal(event.progress, (index + 1) / event.totalWindows);
     });
     assert.equal(completed.at(-1).progress, 1);
+    if (separated) {
+        const firstGameWindow = completed.findIndex(
+            (event) => event.stage === "transcribing",
+        );
+        assert.ok(
+            firstGameWindow > 0,
+            "Separation did not advance before GAME",
+        );
+        assert.ok(
+            completed
+                .slice(firstGameWindow)
+                .every((event) => event.stage === "transcribing"),
+        );
+    }
     if (!game)
         assert.equal(
             new Set(completed.map((event) => event.tensorCount)).size,
@@ -356,10 +374,12 @@ try {
             0,
             "Completed worker retained tensors",
         );
-    assert.ok(terminal.noteCount > 0, "Synthetic long input produced no notes");
+    assert.ok(terminal.noteCount > 0, "Input produced no notes");
     assert.equal(report.ui.resultsHidden, false);
     assert.equal(report.ui.runDisabled, false);
-    assert.deepEqual(report.postedSamples, [seconds * sampleRate]);
+    assert.deepEqual(report.postedSamples, [
+        seconds * sampleRate * (separated ? 2 : 1),
+    ]);
     assert.deepEqual(report.errors, []);
     report.inferencePassed = true;
     report.tensorCountKind = game
@@ -376,7 +396,7 @@ try {
         await evaluate(`(() => {
             const engine = document.getElementById("transcribe-engine");
             engine.value = "basic-pitch"; engine.dispatchEvent(new Event("change"));
-            engine.value = "game"; engine.dispatchEvent(new Event("change"));
+            engine.value = ${JSON.stringify(engine)}; engine.dispatchEvent(new Event("change"));
         })()`);
         assert.equal(await evaluate("window.__longRunEvents.length"), before);
         assert.equal(
@@ -384,6 +404,64 @@ try {
                 "document.getElementById('transcribe-results').hidden",
             ),
             false,
+        );
+    }
+    if (separated) {
+        report.analysis = await evaluate(`(async () => {
+            const { analyzeMelody } = await import("/src/core/transcription/musical-analysis.js");
+            const read = (id) => document.getElementById("transcribe-" + id);
+            const values = () => ["bpm", "origin", "transpose"].map(id => Number(read(id).value));
+            const change = (id, value) => {
+                read(id).value = String(value);
+                read(id).dispatchEvent(new Event("change", { bubbles: true }));
+            };
+            const expected = analyzeMelody(window.__qualityNotes, { clipMs: ${seconds * 1000} });
+            const initial = values();
+            change("bpm", 101);
+            change("origin", 12);
+            change("transpose", 4);
+            read("original-key").click();
+            const originalKey = values();
+            read("auto-fit").click();
+            return { expected, initial, originalKey, fitted: values() };
+        })()`);
+        const { expected, initial, originalKey, fitted } = report.analysis;
+        assert.equal(initial[2], expected.whiteKeyTranspose);
+        assert.deepEqual(originalKey, [101, 12, 0]);
+        assert.deepEqual(fitted, [
+            ...(expected.confidence >= 0.2
+                ? [expected.bpm, expected.originMs]
+                : [101, 12]),
+            expected.whiteKeyTranspose,
+        ]);
+        assert.ok(
+            await until(
+                'document.getElementById("transcribe-storage-status").dataset.i18n === "transcribe.storage.saved"',
+            ),
+        );
+        await send("Page.reload", { ignoreCache: true });
+        assert.ok(
+            await until(
+                'document.getElementById("transcribe-storage-status")?.dataset.i18n === "transcribe.storage.restored"',
+            ),
+        );
+        assert.equal(
+            await evaluate(
+                'document.getElementById("transcribe-engine").value',
+            ),
+            engine,
+        );
+        assert.equal(
+            await evaluate(
+                'document.getElementById("transcribe-results").hidden',
+            ),
+            false,
+        );
+        assert.deepEqual(
+            await evaluate(`["bpm", "origin", "transpose"].map(
+            id => Number(document.getElementById("transcribe-" + id).value)
+        )`),
+            fitted,
         );
     }
     try {

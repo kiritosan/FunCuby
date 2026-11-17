@@ -1,9 +1,20 @@
 import { MAX_OFFSET_MS } from "./transcription/config.js";
 
-// Draft arrangements, not musicological melody extraction. Never mutate the transcription.
+// Pocket-keyboard arrangements with lead-voice tracking and phrase-aware octave placement.
+// Never mutate the input transcription.
 export const ARRANGEMENT_LEVELS = Object.freeze({
-    starter: Object.freeze({ grid: 1, voices: 1, minBeats: 0.5, maxBpm: 72 }),
-    melody: Object.freeze({ grid: 0.5, voices: 1, minBeats: 0.25, maxBpm: 96 }),
+    starter: Object.freeze({
+        grid: 1,
+        voices: 1,
+        minBeats: 0.35,
+        maxBpm: 72,
+    }),
+    melody: Object.freeze({
+        grid: 0.5,
+        voices: 1,
+        minBeats: 0.22,
+        maxBpm: 96,
+    }),
     fuller: Object.freeze({
         grid: 0.25,
         voices: 2,
@@ -21,6 +32,8 @@ export const ARRANGEMENT_LEVELS = Object.freeze({
 const MAIN_OFFSETS = new Set([
     0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19, 21, 23, 24,
 ]);
+const WHITE_PC = new Set([0, 2, 4, 5, 7, 9, 11]);
+const mod = (value, divisor) => ((value % divisor) + divisor) % divisor;
 
 function requireNumber(value, min, max, integer = false) {
     if (
@@ -53,6 +66,275 @@ export function cleanTranscription(input) {
             velocity: Math.max(1, Math.min(127, Math.round(n.velocity))),
         }))
         .sort((a, b) => a.timeMs - b.timeMs || b.note - a.note);
+}
+
+function cleanMonophonicGlitches(notes) {
+    if (notes.length < 3) return notes.map((n) => ({ ...n }));
+    const out = [];
+    for (let i = 0; i < notes.length; i++) {
+        const current = { ...notes[i] };
+        const previous = out.at(-1);
+        const next = notes[i + 1];
+        if (
+            current.durationMs < 85 &&
+            previous &&
+            next &&
+            current.timeMs - (previous.timeMs + previous.durationMs) < 40 &&
+            next.timeMs - (current.timeMs + current.durationMs) < 40 &&
+            previous.durationMs >= 140 &&
+            next.durationMs >= 140 &&
+            current.note !== previous.note &&
+            current.note !== next.note &&
+            (Math.abs(current.note - previous.note) === 1 ||
+                Math.abs(current.note - next.note) === 1)
+        ) {
+            previous.durationMs = Math.max(
+                previous.durationMs,
+                current.timeMs + current.durationMs - previous.timeMs,
+            );
+            continue;
+        }
+        out.push(current);
+    }
+    return out;
+}
+
+function isDensePolyphonic(notes) {
+    if (notes.length < 12) return false;
+    let overlaps = 0,
+        low = 127,
+        high = 0;
+    for (let i = 0; i < notes.length; i++) {
+        low = Math.min(low, notes[i].note);
+        high = Math.max(high, notes[i].note);
+        if (
+            i > 0 &&
+            notes[i].timeMs <
+                notes[i - 1].timeMs +
+                    Math.min(notes[i - 1].durationMs, 180) -
+                    25
+        )
+            overlaps++;
+    }
+    return high - low > 14 && overlaps >= Math.max(3, notes.length * 0.1);
+}
+
+/**
+ * Extracts a single-line lead melody from dense polyphonic candidates using
+ * harmonic suppression and Viterbi pitch-continuity tracking, or cleans tiny
+ * pitch-scoop glitches on monophonic vocal streams.
+ */
+export function extractLeadMelody(input) {
+    const raw = cleanTranscription(input);
+    if (raw.length <= 2) return raw;
+    if (!isDensePolyphonic(raw)) return cleanMonophonicGlitches(raw);
+
+    const rawClusters = [];
+    for (const note of raw) {
+        if (note.durationMs < 45) continue;
+        const last = rawClusters.at(-1);
+        if (last && note.timeMs - last[0].timeMs <= 45) last.push(note);
+        else rawClusters.push([note]);
+    }
+    const clusters = [];
+    for (const group of rawClusters) {
+        const byPitch = new Map();
+        for (const note of group) {
+            const existing = byPitch.get(note.note);
+            if (
+                !existing ||
+                note.durationMs * note.velocity >
+                    existing.durationMs * existing.velocity
+            )
+                byPitch.set(note.note, note);
+        }
+        const unique = [...byPitch.values()].sort((a, b) => a.note - b.note);
+        const highestMid = Math.max(
+            ...unique.filter((c) => c.note <= 79).map((c) => c.note),
+            -1,
+        );
+        const scored = unique
+            .filter((n) => n.note >= 50)
+            .map((n) => {
+                let harmonicPenalty = 0;
+                for (const fund of unique) {
+                    const diff = n.note - fund.note;
+                    if (
+                        (diff === 12 || diff === 19 || diff === 24) &&
+                        fund.velocity >= n.velocity * 0.8
+                    )
+                        harmonicPenalty += diff === 12 ? 1.45 : 1.85;
+                }
+                let registerPrior;
+                if (n.note < 57) registerPrior = -0.24 * (57 - n.note);
+                else if (n.note > 80) registerPrior = -0.22 * (n.note - 80);
+                else registerPrior = 0.62 - 0.015 * Math.abs(n.note - 68);
+                const durationScore = Math.min(
+                    1.4,
+                    Math.log1p(n.durationMs / 120),
+                );
+                const velocityScore = (n.velocity / 127) * 1.1;
+                const leadVoiceBonus =
+                    n.note === highestMid
+                        ? 0.45
+                        : n.note < highestMid
+                          ? -0.15
+                          : 0;
+                return {
+                    note: n,
+                    emit:
+                        registerPrior +
+                        durationScore +
+                        velocityScore +
+                        leadVoiceBonus -
+                        harmonicPenalty,
+                };
+            });
+        if (scored.length) clusters.push(scored);
+    }
+    if (!clusters.length) return raw;
+
+    const clusterCost = clusters.map((group) => {
+        const bestEmit = Math.max(...group.map((item) => item.emit));
+        // Weak low-register accompaniment clusters can be skipped freely during vocal rests.
+        return bestEmit <= 0.85 ? 0 : bestEmit * 0.55;
+    });
+    const prefixSkip = [0];
+    for (const cost of clusterCost) prefixSkip.push(prefixSkip.at(-1) + cost);
+    const rangeSkipCost = (fromExclusive, toExclusive) =>
+        fromExclusive >= toExclusive
+            ? 0
+            : prefixSkip[toExclusive] - prefixSkip[fromExclusive];
+
+    const dp = clusters.map((group) =>
+        group.map(() => ({ score: -Infinity, prevT: -1, prevK: -1 })),
+    );
+    for (let t = 0; t < clusters.length; t++) {
+        for (let k = 0; k < clusters[t].length; k++) {
+            const current = clusters[t][k];
+            let best = {
+                score: current.emit - rangeSkipCost(0, t),
+                prevT: -1,
+                prevK: -1,
+            };
+            const lookback = Math.max(0, t - 8);
+            for (let prevT = t - 1; prevT >= lookback; prevT--) {
+                const skipPenalty = rangeSkipCost(prevT + 1, t);
+                for (let prevK = 0; prevK < clusters[prevT].length; prevK++) {
+                    const previous = clusters[prevT][prevK];
+                    const gapMs =
+                        current.note.timeMs -
+                        (previous.note.timeMs + previous.note.durationMs);
+                    const dtMs = current.note.timeMs - previous.note.timeMs;
+                    const deltaPitch = Math.abs(
+                        current.note.note - previous.note.note,
+                    );
+                    let transition = 0;
+                    if (deltaPitch <= 4) transition += 0.48;
+                    else if (deltaPitch <= 7) transition += 0.16;
+                    else if (deltaPitch <= 12)
+                        transition -= 0.14 * (deltaPitch - 7);
+                    else transition -= 0.7 + 0.26 * (deltaPitch - 12);
+                    if (gapMs > 600 && transition < 0) transition *= 0.35;
+                    if (
+                        gapMs < -80 &&
+                        current.note.note < previous.note.note - 3
+                    )
+                        transition -= 0.95;
+                    if (dtMs < 90 && deltaPitch > 2) transition -= 0.65;
+                    const candidateScore =
+                        dp[prevT][prevK].score +
+                        current.emit +
+                        transition -
+                        skipPenalty;
+                    if (candidateScore > best.score)
+                        best = { score: candidateScore, prevT, prevK };
+                }
+            }
+            dp[t][k] = best;
+        }
+    }
+
+    let endT = clusters.length - 1,
+        endK = 0,
+        bestFinal = -Infinity;
+    for (let t = Math.max(0, clusters.length - 8); t < clusters.length; t++) {
+        const tailCost = rangeSkipCost(t + 1, clusters.length);
+        for (let k = 0; k < clusters[t].length; k++) {
+            const total = dp[t][k].score - tailCost;
+            if (total > bestFinal) {
+                bestFinal = total;
+                endT = t;
+                endK = k;
+            }
+        }
+    }
+
+    const chosen = [];
+    let ct = endT,
+        ck = endK;
+    while (ct >= 0 && ck >= 0) {
+        chosen.push({ ...clusters[ct][ck].note });
+        const step = dp[ct][ck];
+        ct = step.prevT;
+        ck = step.prevK;
+    }
+    chosen.reverse();
+    for (let i = 0; i < chosen.length - 1; i++) {
+        if (chosen[i].timeMs + chosen[i].durationMs > chosen[i + 1].timeMs) {
+            chosen[i].durationMs = Math.max(
+                40,
+                chosen[i + 1].timeMs - chosen[i].timeMs,
+            );
+        }
+    }
+    return chosen;
+}
+
+function foldIntoPocketRange(candidates, firstNote, transpose, globalShift) {
+    if (!candidates.length) return [];
+    const maxNote = firstNote + 24;
+    // Split into phrases across >= 300ms rests so a high/low phrase shifts
+    // together by an octave before resorting to per-note wrapping.
+    const phrases = [];
+    for (const item of candidates) {
+        const current = phrases.at(-1);
+        const prevEnd = current
+            ? current.at(-1).timeMs + current.at(-1).durationMs
+            : -Infinity;
+        if (!current || item.timeMs - prevEnd >= 300) phrases.push([item]);
+        else current.push(item);
+    }
+
+    const mapped = [];
+    for (const phrase of phrases) {
+        let bestDelta = 0,
+            bestOutliers = Infinity;
+        for (const delta of [0, -12, 12]) {
+            let outliers = 0;
+            for (const source of phrase) {
+                const shifted = source.note + transpose + globalShift + delta;
+                if (shifted < firstNote || shifted > maxNote) outliers++;
+            }
+            if (outliers < bestOutliers) {
+                bestOutliers = outliers;
+                bestDelta = delta;
+            }
+        }
+        for (const source of phrase) {
+            const before = source.note + transpose;
+            let note = before + globalShift + bestDelta;
+            if (note < firstNote)
+                note += Math.ceil((firstNote - note) / 12) * 12;
+            if (note > maxNote) note -= Math.ceil((note - maxNote) / 12) * 12;
+            mapped.push({
+                ...source,
+                note,
+                octaveAdjusted: note !== before,
+            });
+        }
+    }
+    return mapped;
 }
 
 export function arrangeTranscription(
@@ -88,9 +370,67 @@ export function arrangeTranscription(
     };
     const beatMs = 60000 / bpm;
     const gridMs = preset.grid * beatMs;
+    let working = raw;
+    if (level !== "original" && isDensePolyphonic(raw)) {
+        const inBounds = raw.filter(
+            (n) =>
+                n.note >= minPitch &&
+                n.note <= maxPitch &&
+                n.timeMs >= originMs,
+        );
+        stats.filtered += raw.length - inBounds.length;
+        const lead = extractLeadMelody(inBounds);
+        if (preset.voices === 1) {
+            stats.reduced += inBounds.length - lead.length;
+            working = lead;
+        } else {
+            // Keep the tracked lead melody as primary voice and attach at most
+            // one consonant lower harmony note (3..10 semitones below) per onset.
+            const duo = [];
+            let cursor = 0;
+            for (const primary of lead) {
+                duo.push(primary);
+                while (
+                    cursor < inBounds.length &&
+                    inBounds[cursor].timeMs < primary.timeMs - 45
+                )
+                    cursor++;
+                let bestHarmony = null;
+                for (
+                    let j = cursor;
+                    j < inBounds.length &&
+                    inBounds[j].timeMs <= primary.timeMs + 45;
+                    j++
+                ) {
+                    const candidate = inBounds[j];
+                    const interval = primary.note - candidate.note;
+                    if (interval < 3 || interval > 10) continue;
+                    if (
+                        !bestHarmony ||
+                        candidate.durationMs * candidate.velocity >
+                            bestHarmony.durationMs * bestHarmony.velocity
+                    )
+                        bestHarmony = candidate;
+                }
+                if (bestHarmony) {
+                    duo.push({
+                        ...bestHarmony,
+                        timeMs: primary.timeMs,
+                        durationMs: Math.min(
+                            bestHarmony.durationMs,
+                            primary.durationMs,
+                        ),
+                    });
+                }
+            }
+            stats.reduced += Math.max(0, inBounds.length - duo.length);
+            working = duo;
+        }
+    }
+
     const groups = new Map();
     let candidates = [];
-    for (const source of raw) {
+    for (const source of working) {
         if (level === "original") {
             candidates.push({ ...source });
             continue;
@@ -104,7 +444,8 @@ export function arrangeTranscription(
             stats.filtered++;
             continue;
         }
-        const timeMs = Math.round((source.timeMs - originMs) / gridMs) * gridMs;
+        const shiftedMs = source.timeMs - originMs;
+        const timeMs = Math.round(shiftedMs / gridMs) * gridMs;
         const note = {
             ...source,
             timeMs,
@@ -112,22 +453,48 @@ export function arrangeTranscription(
                 gridMs,
                 Math.round(source.durationMs / gridMs) * gridMs,
             ),
+            rawDurationMs: source.durationMs,
+            gridErrorMs: Math.abs(shiftedMs - timeMs),
         };
         const key = Math.round(timeMs / gridMs);
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(note);
     }
+
     if (level !== "original") {
-        // Upper-voice heuristic: simultaneous lower pitches are usually accompaniment.
-        // Suppress lower attacks under a held upper note in single-voice drafts.
         let upperEnd = -Infinity,
             upperPitch = -Infinity;
+        const rankCandidate = (n) => {
+            const onMainKey =
+                level !== "starter" ||
+                WHITE_PC.has(mod(n.note + transpose - firstNote, 12));
+            // For simultaneous chord notes (same gridError & duration), fall back
+            // to upper-voice pitch & velocity; when sequential notes quantize to
+            // the same coarse beat, prefer playable main-key beat anchors.
+            return {
+                mainKey: onMainKey ? 1 : 0,
+                anchorScore:
+                    Math.min(1.5, n.rawDurationMs / Math.max(1, gridMs)) -
+                    (n.gridErrorMs / Math.max(1, gridMs)) * 0.65,
+            };
+        };
         for (const group of groups.values()) {
-            group.sort((a, b) => b.note - a.note || b.velocity - a.velocity);
+            group.sort((a, b) => {
+                const ra = rankCandidate(a),
+                    rb = rankCandidate(b);
+                if (ra.mainKey !== rb.mainKey) return rb.mainKey - ra.mainKey;
+                if (Math.abs(ra.anchorScore - rb.anchorScore) > 0.25)
+                    return rb.anchorScore - ra.anchorScore;
+                return b.note - a.note || b.velocity - a.velocity;
+            });
             const unique = group.filter(
                 (note, i) => i === 0 || note.note !== group[i - 1].note,
             );
-            const selected = unique.slice(0, preset.voices);
+            const selected = unique
+                .slice(0, preset.voices)
+                .map(
+                    ({ rawDurationMs: _d, gridErrorMs: _e, ...clean }) => clean,
+                );
             if (
                 preset.voices === 1 &&
                 selected[0].timeMs < upperEnd &&
@@ -161,19 +528,20 @@ export function arrangeTranscription(
                     ? Math.max(lower, Math.min(upper, centered))
                     : centered);
         }
-        candidates = candidates.flatMap((source) => {
-            const before = source.note + transpose;
-            let note = before + stats.octaveShift;
-            // Octave equivalence preserves pitch class; do not clamp to an unrelated pitch.
-            if (note < firstNote)
-                note += Math.ceil((firstNote - note) / 12) * 12;
-            if (note > firstNote + 24)
-                note -= Math.ceil((note - firstNote - 24) / 12) * 12;
-            if (level === "starter" && !MAIN_OFFSETS.has(note - firstNote)) {
+        candidates = foldIntoPocketRange(
+            candidates,
+            firstNote,
+            transpose,
+            stats.octaveShift,
+        ).flatMap((mapped) => {
+            if (
+                level === "starter" &&
+                !MAIN_OFFSETS.has(mapped.note - firstNote)
+            ) {
                 stats.omittedMainKeys++;
                 return [];
             }
-            return [{ ...source, note, octaveAdjusted: note !== before }];
+            return [mapped];
         });
         // Limit simultaneous demands, including sustained notes and octave-fold collisions.
         const active = [];

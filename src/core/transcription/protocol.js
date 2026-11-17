@@ -14,6 +14,7 @@ const STAGES = new Set([
     "initializing",
     "loading",
     "warming",
+    "separating",
     "transcribing",
     "extracting",
 ]);
@@ -144,20 +145,22 @@ export function encodeStart({
         !Object.hasOwn(TRANSCRIPTION_ENGINES, engine)
     )
         throw protocolError("Unsupported transcription engine");
-    if (sampleRate !== TRANSCRIPTION_ENGINES[engine].sampleRate)
+    const spec = TRANSCRIPTION_ENGINES[engine];
+    if (sampleRate !== spec.sampleRate)
         throw protocolError("Unsupported sample rate");
-    if (engine === "game" && !GAME_LANGUAGES.includes(language))
+    if (engine !== "basic-pitch" && !GAME_LANGUAGES.includes(language))
         throw protocolError("Unsupported language");
     if (
         !(samples instanceof Float32Array) ||
         !samples.length ||
-        samples.length > sampleRate * MAX_AUDIO_SECONDS
+        samples.length % spec.channels !== 0 ||
+        samples.length > sampleRate * spec.channels * MAX_AUDIO_SECONDS
     )
         throw protocolError("Invalid sample buffer");
     return envelope(jobId, "start", {
         sampleRate,
         samples,
-        ...(engine === "game" ? { engine, language } : {}),
+        ...(engine !== "basic-pitch" ? { engine, language } : {}),
     });
 }
 
