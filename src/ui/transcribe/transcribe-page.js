@@ -30,6 +30,7 @@ const PREVIEW_NOTES = 64;
 const FIRST_NOTE_MAX = 103;
 const MAX_URL_LENGTH = 2048;
 const ENGINE_PREFERENCE = "transcribe:engine";
+const TRIAL_SECONDS = 25;
 const SAVED_FIELDS = [
     "transcribe-start",
     "transcribe-length",
@@ -57,6 +58,10 @@ export function initTranscribePage({
     preferences,
 }) {
     const enginePicker = byId("transcribe-engine");
+    const startInput = byId("transcribe-start");
+    const lengthInput = byId("transcribe-length");
+    const clipFields = () => [startInput.value, lengthInput.value];
+    let appliedClip = clipFields();
     let sourceUrl = null,
         decoded = null,
         sourceName = "",
@@ -72,6 +77,7 @@ export function initTranscribePage({
         importSeq = 0,
         importing = false;
     let showPipeline = false,
+        vocalBlob = null,
         vocalUrl = null,
         vocalRange = null,
         vocalUnavailable = false;
@@ -94,6 +100,7 @@ export function initTranscribePage({
             if (!showPipeline || pageGone || !vocalRange) return;
             vocalUnavailable = blob === null;
             if (blob) {
+                vocalBlob = blob;
                 vocalUrl = URL.createObjectURL(blob);
                 vocalAudio.src = vocalUrl;
                 const link = byId("transcribe-vocals-download");
@@ -128,6 +135,14 @@ export function initTranscribePage({
         getContext: audioContext,
         piano: audition,
         getBuffer: () => decoded,
+        getVocalStem: (capture) => {
+            if (!vocalBlob) return null;
+            const start = capture.clipStartMs ?? 0;
+            return Math.abs(vocalRange.start - start) <= 1 &&
+                Math.abs(vocalRange.end - start - capture.clipMs) <= 1
+                ? vocalBlob
+                : null;
+        },
         getVolume: () => Number(byId("transcribe-audition-volume").value) / 100,
         pauseSource,
         getName: () => baseName(),
@@ -226,6 +241,7 @@ export function initTranscribePage({
             }
             byId(key).value = value;
         }
+        appliedClip = clipFields();
         if (LEVELS.includes(record.state.level)) level = record.state.level;
         for (const button of byId("transcribe-levels").querySelectorAll(
             ".transcribe-level",
@@ -446,6 +462,7 @@ export function initTranscribePage({
             URL.revokeObjectURL(vocalUrl);
         }
         vocalUrl = null;
+        vocalBlob = null;
         vocalRange = null;
         vocalUnavailable = false;
         renderVocal();
@@ -471,11 +488,21 @@ export function initTranscribePage({
             phase !== "idle" ||
             importing ||
             enginePicker.value === "basic-pitch";
-        byId("transcribe-run").disabled =
+        const runDisabled =
             !decoded ||
             phase !== "idle" ||
             importing ||
             enginePicker.selectedOptions[0]?.disabled;
+        for (const id of [
+            "transcribe-run",
+            "transcribe-trial",
+            "transcribe-whole",
+        ])
+            byId(id).disabled = runDisabled;
+        byId("transcribe-whole").hidden =
+            !decoded ||
+            (startInput.valueAsNumber === 0 &&
+                lengthInput.valueAsNumber >= decoded.duration);
         byId("transcribe-cancel").hidden = phase !== "working";
         for (const id of ["transcribe-start", "transcribe-length"])
             byId(id).disabled = !decoded || importing;
@@ -538,19 +565,13 @@ export function initTranscribePage({
             if (decodedBuffer.duration > MAX_AUDIO_SECONDS)
                 return reject(t("transcribe.errors.tooLong", { limit: 10 }));
             decoded = decodedBuffer;
-            const start = byId("transcribe-start"),
-                length = byId("transcribe-length");
-            start.value = "0";
-            start.max = String(decoded.duration);
-            length.max = String(MAX_AUDIO_SECONDS);
+            startInput.value = "0";
+            startInput.max = String(decoded.duration);
+            lengthInput.max = String(MAX_AUDIO_SECONDS);
             // Default to the whole source, rounded up to 0.1 s so the tail is
             // never clipped by the requested length.
-            length.value = String(
-                Math.min(
-                    MAX_AUDIO_SECONDS,
-                    Math.max(1, Math.ceil(decoded.duration * 10) / 10),
-                ),
-            );
+            lengthInput.value = String(requestedLength(decoded.duration));
+            appliedClip = clipFields();
             byId("transcribe-clip").hidden = false;
             phase = "idle";
             byId("transcribe-status").textContent = "";
@@ -838,9 +859,7 @@ export function initTranscribePage({
 
     async function run() {
         if (!decoded || phase !== "idle") return;
-        const startInput = byId("transcribe-start"),
-            lengthInput = byId("transcribe-length"),
-            start = Number(startInput.value),
+        const start = Number(startInput.value),
             length = Number(lengthInput.value);
         if (
             startInput.value.trim() === "" ||
@@ -1363,6 +1382,35 @@ export function initTranscribePage({
         );
     });
     byId("transcribe-run").addEventListener("click", report(run));
+    byId("transcribe-trial").addEventListener(
+        "click",
+        report(async () => {
+            const start = startInput.valueAsNumber;
+            if (
+                !decoded ||
+                !Number.isFinite(start) ||
+                start < 0 ||
+                start >= decoded.duration
+            ) {
+                showError(t("transcribe.errors.invalidClip"));
+                return;
+            }
+            const length = requestedLength(
+                Math.min(TRIAL_SECONDS, decoded.duration - start),
+            );
+            if (changeClip(startInput.value, String(length))) await run();
+        }),
+    );
+    byId("transcribe-whole").addEventListener(
+        "click",
+        report(async () => {
+            if (
+                decoded &&
+                changeClip("0", String(requestedLength(decoded.duration)))
+            )
+                await run();
+        }),
+    );
     byId("transcribe-cancel").addEventListener("click", cancel);
     byId("transcribe-diagnostics").addEventListener(
         "click",
@@ -1376,24 +1424,34 @@ export function initTranscribePage({
             );
         }),
     );
-    function changeClip() {
-        const edited = currentCapture()?.editedNotes !== undefined;
-        if (edited && !window.confirm(t("transcribe.editor.confirmClip"))) {
-            const capture = currentCapture();
-            byId("transcribe-start").value = String(
-                (capture.clipStartMs ?? 0) / 1000,
+    function requestedLength(duration) {
+        return Math.min(
+            MAX_AUDIO_SECONDS,
+            Math.max(1, Math.ceil(duration * 10) / 10),
+        );
+    }
+    function changeClip(start, length) {
+        const changed = start !== appliedClip[0] || length !== appliedClip[1];
+        if (changed) {
+            const edited = [...captures.values()].some(
+                (capture) => capture.editedNotes !== undefined,
             );
-            byId("transcribe-length").value = String(capture.clipMs / 1000);
-            return;
+            if (edited && !window.confirm(t("transcribe.editor.confirmClip"))) {
+                [startInput.value, lengthInput.value] = appliedClip;
+                return false;
+            }
+            appliedClip = [start, length];
+            [startInput.value, lengthInput.value] = appliedClip;
+            invalidate();
+            resetResults();
+            saveState();
         }
-        invalidate();
-        resetResults();
-        saveState();
+        return true;
     }
     // Handle input immediately so in-flight inference cannot land on a new clip.
-    for (const id of ["transcribe-start", "transcribe-length"])
+    for (const input of [startInput, lengthInput])
         for (const event of ["input", "change"])
-            byId(id).addEventListener(event, changeClip);
+            input.addEventListener(event, () => changeClip(...clipFields()));
     for (const id of [
         "transcribe-bpm",
         "transcribe-origin",

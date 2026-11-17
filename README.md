@@ -47,10 +47,12 @@ same browser and address (including port); clearing site data, private windows
 or browser eviction can remove saved work. Keep important MIDI backups. See
 [melody quality and local storage](docs/melody-quality.md).
 
-The melody review panel compares the same short phrase in the source and piano,
-supports looping and manual note/timing/split/merge edits, and retains the
-unedited recognition separately. Edits update all difficulty versions and save
-locally. Review exports are unverified drafts, not certified scores.
+Use **Try 25 seconds** to transcribe a short sample from the current start, then
+**Transcribe whole track** when ready. In melody review you can play the same
+phrase from the source, isolated vocals and piano draft in a loop. Edits to
+pitch, timing, splits and merges update all difficulty versions and are saved
+separately from the recognizer notes. See the [local benchmark](docs/melody-evaluation.md)
+for reference-based evaluation.
 
 Transcription uses [Spotify Basic Pitch](https://github.com/spotify/basic-pitch-ts) and [TensorFlow.js](https://github.com/tensorflow/tfjs), bundled locally under `vendor/` (gitignored, rebuilt by `npm start`). Both are Apache-2.0; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Personal use does not remove license obligations. The job/worker/diagnostics design is documented in [docs/transcription-architecture.md](docs/transcription-architecture.md).
 
@@ -102,9 +104,10 @@ npm start
 无痕模式、清理站点数据或浏览器回收空间可能删除保存，重要 MIDI 仍建议备份。
 详情见[旋律质量与本机保存说明](docs/melody-quality.md)。
 
-「旋律核对与修订」可在同一短句间交替试听原曲和钢琴、循环核对，并修改音高、
-时值、拆分或合并同音。修订会自动更新各难度并保存在本机，未经编辑的识别稿
-单独保留。核对导出仍标为未验证草稿，不会自动冒充可靠定稿。
+「试扒 25 秒」从当前片段起点快速出谱，之后可点「转写整首」。在「旋律核对与修订」
+中，可以在同一短句范围依次循环试听原曲、分离人声和钢琴草稿，并修改音高、时值、
+拆分或合并同音。修订会更新各难度并保存在本机，原始识别稿单独保留。
+识别质量可用[本机基准评测](docs/melody-evaluation.md)追踪。
 
 转写功能使用 [Spotify Basic Pitch](https://github.com/spotify/basic-pitch-ts) 与 [TensorFlow.js](https://github.com/tensorflow/tfjs)，打包在本地 `vendor/` 目录（已被 gitignore，由 `npm start` 重新生成）。两者均为 Apache-2.0 协议，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。个人使用并不免除许可义务。任务/Worker/诊断设计见 [docs/transcription-architecture.md](docs/transcription-architecture.md)。
 

@@ -6,6 +6,7 @@ import {
     reviewFlags,
 } from "../../src/core/transcription/melody-edit.js";
 import { createPhrasePlayer } from "../../src/ui/transcribe/phrase-player.js";
+import { decodeVocalPhrase } from "../../src/ui/transcribe/vocal-phrase.js";
 
 const note = (pitch, timeMs, durationMs) => ({
     note: pitch,
@@ -85,7 +86,7 @@ test("phrase selection clips sustains at both endpoints and preserves rests", ()
     ]);
 });
 
-function rig() {
+function rig({ loadVocal } = {}) {
     const sources = [],
         clocks = new Set(),
         updates = [];
@@ -121,7 +122,7 @@ function rig() {
         async play(notes, options) {
             this.notes = notes;
             this.options = options;
-            return { startAt: 5.08 };
+            return { startAt: context.currentTime + 0.08 };
         },
     };
     const player = createPhrasePlayer(() => context, piano, {
@@ -135,6 +136,7 @@ function rig() {
         onUpdate(event) {
             updates.push(event);
         },
+        loadVocal,
     });
     const input = {
         mode: "source",
@@ -201,4 +203,95 @@ test("cancellation while resuming or loading cannot start late phrase playback",
     await second;
     assert.equal(r.clocks.size, 0);
     assert.equal(r.player.active, false);
+});
+
+test("one phrase plays original, isolated vocals and piano in order, then loops the sequence", async () => {
+    const vocalStem = new Blob();
+    const decoded = { duration: 0.8 };
+    const r = rig({
+        async loadVocal(context, stem, from, to) {
+            assert.equal(context, r.context);
+            assert.equal(stem, vocalStem);
+            assert.deepEqual([from, to], [100, 900]);
+            return decoded;
+        },
+    });
+    const advance = async () => {
+        r.context.currentTime += 1;
+        for (const tick of [...r.clocks]) tick();
+        await Promise.resolve();
+    };
+    await r.player.play({ ...r.input, mode: "compare", vocalStem, loop: true });
+    assert.deepEqual(r.sources[0].args, [5.08, 10.1, 0.8]);
+    await advance();
+    assert.equal(r.sources[0].stopped, true);
+    assert.equal(r.sources[1].buffer, decoded);
+    assert.deepEqual(r.sources[1].args, [6.08, 0, 0.8]);
+    assert.equal(r.sources[1].loop, false);
+    await advance();
+    assert.deepEqual(r.piano.notes, [note(60, 100, 300)]);
+    assert.deepEqual(r.piano.options, { durationMs: 800, loop: false });
+    await advance();
+    assert.equal(r.sources[2].args[1], 10.1);
+    assert.equal(r.updates.at(-1).mode, "source");
+    r.player.stop();
+    assert.equal(r.clocks.size, 0);
+});
+
+test("cancelled vocal decoding cannot schedule audio after switching tracks", async () => {
+    let finishDecode;
+    const r = rig({
+        loadVocal: () =>
+            new Promise((resolve) => {
+                finishDecode = resolve;
+            }),
+    });
+    const vocals = r.player.play({
+        ...r.input,
+        mode: "vocals",
+        vocalStem: new Blob(),
+    });
+    await r.player.play(r.input);
+    finishDecode({ duration: 0.8 });
+    await vocals;
+    assert.equal(r.sources.length, 1);
+    assert.equal(r.updates.at(-1).mode, "source");
+    r.player.stop();
+});
+
+test("vocal WAV phrase decoding keeps both channels and reads the selected frames", async () => {
+    const wav = Buffer.alloc(44 + 32);
+    wav.write("RIFF", 0);
+    wav.writeUInt32LE(wav.length - 8, 4);
+    wav.write("WAVEfmt ", 8);
+    wav.writeUInt32LE(16, 16);
+    wav.writeUInt16LE(1, 20);
+    wav.writeUInt16LE(2, 22);
+    wav.writeUInt32LE(44100, 24);
+    wav.writeUInt16LE(4, 32);
+    wav.writeUInt16LE(16, 34);
+    wav.write("data", 36);
+    wav.writeUInt32LE(32, 40);
+    for (let frame = 0; frame < 8; frame++) {
+        wav.writeInt16LE(frame * 1024, 44 + frame * 4);
+        wav.writeInt16LE(-frame * 2048, 46 + frame * 4);
+    }
+    const context = {
+        createBuffer(channels, frames, rate) {
+            assert.deepEqual([channels, frames, rate], [2, 4, 44100]);
+            const data = [new Float32Array(frames), new Float32Array(frames)];
+            return { getChannelData: (channel) => data[channel] };
+        },
+    };
+    const stem = new Blob([wav], { type: "audio/wav" });
+    const phrase = await decodeVocalPhrase(context, stem, 2 / 44.1, 6 / 44.1);
+    assert.deepEqual(
+        [...phrase.getChannelData(0)],
+        [2, 3, 4, 5].map((n) => n / 32),
+    );
+    assert.deepEqual(
+        [...phrase.getChannelData(1)],
+        [2, 3, 4, 5].map((n) => -n / 16),
+    );
+    await assert.rejects(decodeVocalPhrase(context, stem.slice(0, 40), 0, 10));
 });

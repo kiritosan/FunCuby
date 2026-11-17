@@ -404,6 +404,30 @@ try {
         assert.equal(report.vocals.duration, seconds);
         assert.equal(report.vocals.played, true);
         assert.match(report.vocals.link, /vocals\.wav$/);
+        report.phraseSequence = await evaluate(`(async () => {
+            const editor = document.getElementById("transcribe-editor");
+            const get = (key) => editor.querySelector('[data-field="' + key + '"]');
+            get("from").value = "0.2";
+            get("to").value = "0.65";
+            get("to").dispatchEvent(new Event("change"));
+            get("loop").checked = true;
+            editor.querySelector('[data-action="compare"]').click();
+            const tracks = [], deadline = Date.now() + 10000;
+            while (tracks.length < 4 && Date.now() < deadline) {
+                const track = editor.dataset.playing;
+                if (track && track !== tracks.at(-1) && editor.textContent.includes("短句播放中"))
+                    tracks.push(track);
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }
+            editor.querySelector('[data-action="stop"]').click();
+            return tracks;
+        })()`);
+        assert.deepEqual(report.phraseSequence, [
+            "source",
+            "vocals",
+            "piano",
+            "source",
+        ]);
     }
     assert.deepEqual(
         await evaluate(`[...document.querySelectorAll("#transcribe-pipeline-steps li")].map(
@@ -576,6 +600,12 @@ try {
         assert.equal(
             await evaluate(
                 'document.getElementById("transcribe-vocals").hidden',
+            ),
+            true,
+        );
+        assert.equal(
+            await evaluate(
+                "document.querySelector('#transcribe-editor [data-action=\"vocals\"]').disabled",
             ),
             true,
         );

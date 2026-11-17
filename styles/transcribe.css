@@ -301,6 +301,13 @@
     margin-top: 0.75rem;
 }
 
+.melody-editor[data-playing="source"] [data-action="source"],
+.melody-editor[data-playing="vocals"] [data-action="vocals"],
+.melody-editor[data-playing="piano"] [data-action="piano"] {
+    border-color: var(--primary);
+    box-shadow: inset 0 0 0 1px var(--primary);
+}
+
 .melody-editor-loop {
     flex-direction: row;
     align-items: center;

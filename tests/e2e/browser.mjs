@@ -96,11 +96,12 @@ export async function openTestBrowser(profile) {
             throw new Error(JSON.stringify(result.exceptionDetails));
         return result.result.value;
     };
-    const until = async (expression) => {
-        for (let i = 0; i < 200; i++) {
+    const until = async (expression, timeoutMs = 20000) => {
+        const deadline = Date.now() + timeoutMs;
+        do {
             if (await evaluate(expression)) return true;
             await wait(100);
-        }
+        } while (Date.now() < deadline);
         throw new Error(`Timed out: ${expression}`);
     };
     await send("Runtime.enable");

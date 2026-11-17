@@ -16,6 +16,7 @@ export function createMelodyEditor({
     getContext,
     piano,
     getBuffer,
+    getVocalStem,
     getVolume,
     pauseSource,
     onChange,
@@ -66,10 +67,11 @@ export function createMelodyEditor({
     const status = el("p", "", "muted transcribe-status-line");
     status.setAttribute("role", "status");
     const player = createPhrasePlayer(getContext, piano, {
+        onError,
         onUpdate: (state) => {
             host.dataset.playing = state.active ? state.mode : "";
             status.textContent = state.active
-                ? `${text(state.loading ? "loading" : "playing")} · ${((state.positionMs ?? 0) / 1000).toFixed(2)} s`
+                ? `${text(state.loading ? "loading" : "playing")} · ${text(state.mode)} · ${((state.positionMs ?? 0) / 1000).toFixed(2)} s`
                 : text("stopped");
         },
     });
@@ -97,6 +99,7 @@ export function createMelodyEditor({
         await player.play({
             mode,
             buffer: getBuffer(),
+            vocalStem: getVocalStem(capture),
             notes: workingNotes(capture),
             clipStartMs: capture.clipStartMs ?? 0,
             fromMs,
@@ -106,12 +109,21 @@ export function createMelodyEditor({
         });
     }
     const sourceButton = button("source", () => play("source"));
+    const vocalButton = button("vocals", () => play("vocals"));
     const pianoButton = button("piano", () => play("piano"));
+    const compareButton = button("compare", () => play("compare"));
+    const vocalHint = el(
+        "p",
+        text("vocalHint"),
+        "muted transcribe-status-line",
+    );
     range.append(from.label, to.label);
     const transport = el("div", "", "play-controls");
     transport.append(
         sourceButton,
+        vocalButton,
         pianoButton,
+        compareButton,
         button("stop", stop),
         loopLabel,
     );
@@ -241,6 +253,7 @@ export function createMelodyEditor({
         hint,
         range,
         transport,
+        vocalHint,
         status,
         navigation,
         summary,
@@ -335,7 +348,11 @@ export function createMelodyEditor({
             for (const node of host.querySelectorAll("button,input"))
                 node.disabled = busy;
             sourceButton.disabled = busy || !getBuffer();
+            const hasVocal = Boolean(getVocalStem(capture));
+            vocalButton.disabled = busy || !hasVocal;
+            vocalHint.hidden = hasVocal;
             pianoButton.disabled = busy;
+            compareButton.disabled = sourceButton.disabled;
             undo.disabled = busy || !history.length;
             reset.disabled = busy || capture.editedNotes === undefined;
             editedStatus.textContent = text(

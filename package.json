@@ -12,6 +12,7 @@
     "setup:game": "node scripts/setup-game.mjs",
     "setup:separation": "node scripts/setup-separation.mjs",
     "evaluate:separation": "node scripts/evaluate-separation.mjs",
+    "evaluate:melody": "node scripts/evaluate-melody.mjs",
     "build:transcription": "node scripts/build-transcription.mjs",
     "test": "node --test \"tests/unit/*.test.js\"",
     "test:e2e": "node tests/e2e/smoke.mjs",

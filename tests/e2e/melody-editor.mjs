@@ -7,24 +7,28 @@ import { openTestBrowser } from "./browser.mjs";
 
 const PORT = 18579,
     base = `http://127.0.0.1:${PORT}`;
-const wav = Buffer.alloc(44 + 44100 * 4 * 2);
-wav.write("RIFF");
-wav.writeUInt32LE(wav.length - 8, 4);
-wav.write("WAVEfmt ", 8);
-wav.writeUInt32LE(16, 16);
-wav.writeUInt16LE(1, 20);
-wav.writeUInt16LE(1, 22);
-wav.writeUInt32LE(44100, 24);
-wav.writeUInt32LE(88200, 28);
-wav.writeUInt16LE(2, 32);
-wav.writeUInt16LE(16, 34);
-wav.write("data", 36);
-wav.writeUInt32LE(wav.length - 44, 40);
-for (let i = 0; i < 44100 * 4; i++)
-    wav.writeInt16LE(
-        Math.round(Math.sin((i * 2 * Math.PI * 440) / 44100) * 6000),
-        44 + i * 2,
-    );
+function testWav(seconds) {
+    const frames = 44100 * seconds;
+    const wav = Buffer.alloc(44 + frames * 2);
+    wav.write("RIFF");
+    wav.writeUInt32LE(wav.length - 8, 4);
+    wav.write("WAVEfmt ", 8);
+    wav.writeUInt32LE(16, 16);
+    wav.writeUInt16LE(1, 20);
+    wav.writeUInt16LE(1, 22);
+    wav.writeUInt32LE(44100, 24);
+    wav.writeUInt32LE(88200, 28);
+    wav.writeUInt16LE(2, 32);
+    wav.writeUInt16LE(16, 34);
+    wav.write("data", 36);
+    wav.writeUInt32LE(wav.length - 44, 40);
+    for (let i = 0; i < frames; i++)
+        wav.writeInt16LE(
+            Math.round(Math.sin((i * 2 * Math.PI * 440) / 44100) * 6000),
+            44 + i * 2,
+        );
+    return wav;
+}
 const note = (note, timeMs, durationMs) => ({
     note,
     timeMs,
@@ -79,7 +83,7 @@ let browser;
 try {
     await mkdir(".test-artifacts", { recursive: true });
     const path = resolve(".test-artifacts/editor-source.wav");
-    await writeFile(path, wav);
+    await writeFile(path, testWav(4));
     browser = await openTestBrowser("edge-profile-melody-editor");
     await browser.send("Storage.clearDataForOrigin", {
         origin: base,
@@ -101,12 +105,15 @@ try {
         ),
         "basic-pitch",
     );
-    const { root } = await browser.send("DOM.getDocument");
-    const { nodeId } = await browser.send("DOM.querySelector", {
-        nodeId: root.nodeId,
-        selector: "#transcribe-file",
-    });
-    await browser.send("DOM.setFileInputFiles", { nodeId, files: [path] });
+    const setFile = async (file) => {
+        const { root } = await browser.send("DOM.getDocument");
+        const { nodeId } = await browser.send("DOM.querySelector", {
+            nodeId: root.nodeId,
+            selector: "#transcribe-file",
+        });
+        await browser.send("DOM.setFileInputFiles", { nodeId, files: [file] });
+    };
+    await setFile(path);
     await browser.until(`!document.getElementById("transcribe-run").disabled`);
     await browser.evaluate(`(() => {
         for (const [id,value] of [["transcribe-start","0.5"],["transcribe-length","3"]]) {
@@ -247,9 +254,19 @@ try {
     assert.equal(result.notes[0].note, 60);
     assert.equal(await browser.evaluate(`window.__workers`), 0);
     await browser.evaluate(
-        `window.confirm = () => false; document.getElementById("transcribe-run").click()`,
+        `(() => {
+            window.confirm = () => false;
+            for (const id of ["run", "trial", "whole"])
+                document.getElementById("transcribe-" + id).click();
+        })()`,
     );
     assert.equal(await browser.evaluate(`window.__workers`), 0);
+    assert.equal(
+        await browser.evaluate(
+            `document.getElementById("transcribe-length").value`,
+        ),
+        "3",
+    );
     await browser.evaluate(`(() => {
         const start=document.getElementById("transcribe-start");
         start.value="1"; start.dispatchEvent(new Event("input"));
@@ -308,6 +325,47 @@ try {
         document.getElementById("transcribe-storage-status").dataset.i18n === "transcribe.storage.restored"`);
     await checkLayout(320);
     await checkLayout(1440);
+    await browser.evaluate(`(() => {
+        window.confirm = () => true;
+        document.getElementById("transcribe-trial").click();
+    })()`);
+    await browser.until(
+        `window.__workers === 1 && !document.getElementById("transcribe-run").disabled`,
+    );
+    await saved();
+    assert.equal((await capture()).clipMs, 3500);
+
+    const longPath = resolve(".test-artifacts/editor-trial-source.wav");
+    await writeFile(longPath, testWav(34));
+    await setFile(longPath);
+    await browser.until(`document.getElementById("transcribe-length").value === "34" &&
+        !document.getElementById("transcribe-run").disabled`);
+    await browser.evaluate(`(() => {
+        const start = document.getElementById("transcribe-start");
+        start.value = "4";
+        start.dispatchEvent(new Event("input"));
+        document.getElementById("transcribe-trial").click();
+    })()`);
+    await browser.until(
+        `window.__workers === 2 && !document.getElementById("transcribe-run").disabled`,
+    );
+    await saved();
+    result = await capture();
+    assert.equal(result.clipMs, 25000);
+    assert.equal(result.clipStartMs, 4000);
+    await browser.evaluate(
+        `document.getElementById("transcribe-whole").click()`,
+    );
+    await browser.until(
+        `window.__workers === 3 && !document.getElementById("transcribe-run").disabled`,
+    );
+    await saved();
+    result = await capture();
+    assert.equal(result.clipMs, 34000);
+    assert.equal(result.clipStartMs, 0);
+    console.log(
+        "PASS: 25-second trial is capped at the source end, honors the clip start, and can expand to the whole track",
+    );
     assert.deepEqual(browser.errors, []);
     console.log(
         "PASS: Chinese and English guides and editor controls fit 320–1440 px without runtime exceptions",

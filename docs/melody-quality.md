@@ -49,7 +49,9 @@ MDX-Net Voc FT ONNX model for CPU vocal separation. See
 
 ## Usage and comparison
 
-1. Import audio as before. Start with a familiar 20-30 second vocal phrase.
+1. Import audio, set the clip start to a familiar phrase and select **Try 25
+   seconds**. It uses the current mode and ends at the source end if less audio
+   remains. Use **Transcribe whole track** when you're ready to expand the clip.
 2. Select **GAME · Clear vocals** and the singing language for a quick draft
    from a clear lead vocal. If the backing track masks the singer, select
    **UVR + GAME · Mixed vocals** to extract the vocal stem before transcription.
@@ -110,14 +112,14 @@ the channels from the conversion. Previously saved audio is reused as stored.
 ## Phrase review and non-destructive editing
 
 After transcription, the review panel selects a 0.1-30 second phrase relative to
-the transcription clip. Alternate original audio and working piano using the
-same endpoints, with an optional loop. Source playback adds `clipStartMs`, so a
-clip starting at source minute one does not accidentally compare with the intro.
-The comparison is A/B, not simultaneous duet playback. Each mode restarts from
-the phrase start; no equal-loudness or perceptual synchronization claim is made.
-Piano plays unquantized working notes, not the simplified arrangement. The
-position display follows the Web Audio clock; notes that cross the phrase bounds
-are clipped, and rests retain their duration.
+the clip. Play the original, isolated vocals or piano draft individually, or
+select **Play in sequence**. With **Loop phrase** enabled, the chosen track or
+sequence repeats. A stem from the same clip can also be reviewed when another
+mode is selected. If a stem is unavailable, the sequence plays original then
+piano. Original audio adds `clipStartMs`; the WAV stem uses clip-relative time.
+Each starts from the same phrase endpoint, and the piano uses the unquantized
+working notes. The timing display follows the Web Audio clock. Notes crossing
+the phrase bounds are clipped and rests retain their duration.
 
 Select a note to change MIDI pitch, onset or duration, delete it, split it into
 repeated notes, or merge adjacent same-pitch notes. Add missing notes with the
@@ -183,8 +185,8 @@ mode switching. The separated run also checked that auto-fit set 136 BPM,
 an 18 ms beat origin and a +5 semitone shift, that Original Key preserved manual
 rhythm settings, and that the result and settings survived a reload.
 
-Musical accuracy remains unmeasured because the project lacks a manually checked
-reference melody. Lead and backing vocals can still be confused, and choirs,
+The [local benchmark](melody-evaluation.md) uses independent vocal annotations
+and a known piano score. Lead and backing vocals can still be confused, and choirs,
 instrumental interludes and octave errors remain important failure cases. Tempo
 may be interpreted at half or double speed. Starter quantization and main-key
 selection can omit short notes or chromatic notes.
