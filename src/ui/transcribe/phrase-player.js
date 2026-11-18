@@ -1,6 +1,40 @@
 import { phraseNotes } from "../../core/transcription/melody-edit.js";
 import { decodeVocalPhrase } from "./vocal-phrase.js";
 
+function beatPreview(context, buffer, startMs, durationMs, fromMs, beat) {
+    if (
+        !Number.isFinite(beat?.bpm) ||
+        beat.bpm < 20 ||
+        beat.bpm > 240 ||
+        !Number.isFinite(beat.originMs)
+    )
+        throw new RangeError("Invalid beat grid");
+    const rate = buffer.sampleRate,
+        length = Math.ceil((durationMs * rate) / 1000);
+    const mix = context.createBuffer(1, length, rate),
+        channel = mix.getChannelData(0);
+    const offset = Math.round((startMs * rate) / 1000);
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+        const input = buffer
+            .getChannelData(c)
+            .subarray(offset, offset + length);
+        for (let i = 0; i < input.length; i++)
+            channel[i] += (input[i] * 0.7) / buffer.numberOfChannels;
+    }
+    const period = 60000 / beat.bpm;
+    const first =
+        beat.originMs + Math.ceil((fromMs - beat.originMs) / period) * period;
+    for (let ms = first - fromMs; ms < durationMs; ms += period) {
+        const at = Math.max(0, Math.round((ms * rate) / 1000));
+        for (let i = 0; i < rate * 0.035 && at + i < length; i++)
+            channel[at + i] +=
+                0.27 *
+                Math.sin((i * 2 * Math.PI * 1200) / rate) *
+                Math.exp(-i / (0.007 * rate));
+    }
+    return mix;
+}
+
 // Each track uses the same clip-relative phrase. One transport owns the
 // scheduled audio, pending decodes, and optional loop across tracks.
 export function createPhrasePlayer(
@@ -48,11 +82,13 @@ export function createPhrasePlayer(
         toMs,
         loop,
         volume = 0.75,
+        onSounding,
+        beat,
     }) {
         stop();
         piano.stop();
         if (
-            !["source", "vocals", "piano", "compare"].includes(mode) ||
+            !["source", "vocals", "piano", "compare", "beat"].includes(mode) ||
             (mode === "vocals" && !vocalStem) ||
             !buffer ||
             !Number.isFinite(clipStartMs) ||
@@ -86,8 +122,12 @@ export function createPhrasePlayer(
             let startAt;
             if (track === "piano") {
                 const result = await piano.play(
-                    phraseNotes(notes, fromMs, toMs),
-                    { durationMs, loop: loopTrack },
+                    phraseNotes(notes, fromMs, toMs, Boolean(onSounding)),
+                    {
+                        durationMs,
+                        loop: loopTrack,
+                        ...(onSounding && { onSounding }),
+                    },
                 );
                 if (session !== run) return;
                 startAt = result?.startAt;
@@ -110,7 +150,19 @@ export function createPhrasePlayer(
                 run.source = source;
                 run.gain = context.createGain();
                 run.gain.gain.value = Math.max(0, Math.min(1, volume));
-                source.buffer = track === "source" ? buffer : run.vocalBuffer;
+                source.buffer =
+                    track === "beat"
+                        ? beatPreview(
+                              context,
+                              buffer,
+                              clipStartMs + fromMs,
+                              durationMs,
+                              fromMs,
+                              beat,
+                          )
+                        : track === "source"
+                          ? buffer
+                          : run.vocalBuffer;
                 source.connect(run.gain);
                 run.gain.connect(context.destination);
                 startAt = context.currentTime + 0.08;

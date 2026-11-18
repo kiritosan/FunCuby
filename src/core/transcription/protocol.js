@@ -99,7 +99,28 @@ const checkNote = (note) => {
         note.velocity > 127
     )
         throw protocolError("Invalid note velocity");
+    const { boundary } = note;
+    if (
+        boundary !== undefined &&
+        (!isObject(boundary) ||
+            !Number.isFinite(boundary.releaseMs) ||
+            boundary.releaseMs < 20 ||
+            note.durationMs - boundary.releaseMs < 20 ||
+            (boundary.repeatMs !== undefined &&
+                (!Number.isFinite(boundary.repeatMs) ||
+                    boundary.repeatMs - boundary.releaseMs < 20 ||
+                    note.durationMs - boundary.repeatMs < 20)))
+    )
+        throw protocolError("Invalid vocal boundary");
     return {
+        ...(boundary && {
+            boundary: {
+                releaseMs: boundary.releaseMs,
+                ...(boundary.repeatMs !== undefined && {
+                    repeatMs: boundary.repeatMs,
+                }),
+            },
+        }),
         note: note.note,
         timeMs: note.timeMs,
         durationMs: note.durationMs,

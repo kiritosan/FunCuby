@@ -123,7 +123,8 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     cases = []
     with ZipFile(args.vocadito) as archive:
-        for track, language in [(20, "en"), (28, "auto")]:
+        # Mandarin songs 35 and 36 are independent, held-out recordings.
+        for track, language in [(20, "en"), (28, "auto"), (35, "zh"), (36, "zh")]:
             vocal, references = load_vocal(archive, track)
             cases.append(write_case(args.output, f"vocadito-{track}-solo", "clean-vocal",
                                     vocal, references, language))

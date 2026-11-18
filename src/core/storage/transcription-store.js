@@ -26,20 +26,48 @@ export function validateTranscriptionDraft({ source, state } = {}) {
     if (!source && !state) return null;
     if (
         source?.version !== 1 ||
-        state?.version !== 1 ||
         typeof source.id !== "string" ||
-        source.id !== state.sourceId ||
         !(source.blob instanceof Blob) ||
         !source.blob.size ||
         source.blob.size > MAX_FILE_BYTES ||
-        typeof source.name !== "string" ||
+        typeof source.name !== "string"
+    )
+        throw new Error("Invalid saved source");
+    validateDraftState(source.id, state);
+    return { source, state };
+}
+
+export function validateDraftState(id, state) {
+    if (
+        state?.version !== 1 ||
+        state.sourceId !== id ||
         !Array.isArray(state.captures) ||
         state.captures.length > CAPTURE_KEYS.size ||
         typeof state.settings !== "object" ||
         !state.settings
     )
         throw new Error("Invalid saved transcription");
-    for (const [key, capture] of state.captures) {
+    validateCaptures(state.captures);
+    if (state.clipVersions !== undefined) {
+        if (!Array.isArray(state.clipVersions))
+            throw new Error("Invalid clip history");
+        for (const [range, version] of state.clipVersions) {
+            const parts = range.split("/");
+            if (
+                parts.length !== 2 ||
+                parts.some((v) => !v || !Number.isFinite(Number(v))) ||
+                !version?.settings
+            )
+                throw new Error("Invalid saved clip version");
+            validateCaptures(version.captures);
+        }
+    }
+}
+
+function validateCaptures(captures) {
+    if (!Array.isArray(captures) || captures.length > CAPTURE_KEYS.size)
+        throw new Error("Invalid captures");
+    for (const [key, capture] of captures) {
         if (
             !CAPTURE_KEYS.has(key) ||
             !Number.isFinite(capture?.clipMs) ||
@@ -61,7 +89,6 @@ export function validateTranscriptionDraft({ source, state } = {}) {
         if (capture.editedNotes !== undefined)
             validateMelody(capture.editedNotes, capture.clipMs);
     }
-    return { source, state };
 }
 
 // One workbench, separate from device logs. Blob + initial state commit
@@ -196,11 +223,41 @@ export class TranscriptionStore {
 
     replace(source, state) {
         validateTranscriptionDraft({ source, state });
-        return this.#run("readwrite", (store) => {
+        return this.#run("readwrite", async (store) => {
+            const [previous, draft, titles = []] = await Promise.all(
+                ["source", "state", "library"].map((key) =>
+                    request(store.get(key)),
+                ),
+            );
+            const list = titles.filter(
+                (item) => item.id !== source.id && item.id !== previous?.id,
+            );
+            if (previous && draft && previous.id !== source.id) {
+                store.put(
+                    { source: previous, state: draft },
+                    "song:" + previous.id,
+                );
+                list.unshift({ id: previous.id, name: previous.name });
+            }
+            store.put(list, "library");
+            store.delete("song:" + source.id);
             store.put(source, "source");
             store.put(state, "state");
             return true;
         });
+    }
+
+    listSongs() {
+        return this.#run(
+            "readonly",
+            async (store) => (await request(store.get("library"))) ?? [],
+        );
+    }
+
+    loadSong(id) {
+        return this.#run("readonly", async (store) =>
+            validateTranscriptionDraft(await request(store.get("song:" + id))),
+        );
     }
 
     saveState(sourceId, state) {
@@ -217,9 +274,17 @@ export class TranscriptionStore {
         });
     }
 
-    clear() {
-        return this.#run("readwrite", (store) => {
-            store.clear();
+    clear(expectedId) {
+        return this.#run("readwrite", async (store) => {
+            if (
+                expectedId !== undefined &&
+                ((await request(store.get("source")))?.id ?? null) !==
+                    expectedId
+            )
+                return false;
+            store.delete("source");
+            store.delete("state");
+            return true;
         });
     }
 }

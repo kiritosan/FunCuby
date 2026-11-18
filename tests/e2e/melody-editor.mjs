@@ -36,6 +36,7 @@ const note = (note, timeMs, durationMs) => ({
     velocity: 90,
 });
 const notes = [note(60, 100, 600), note(60, 800, 400), note(72, 1500, 60)];
+notes[1].boundary = { releaseMs: 120, repeatMs: 220 };
 const instrument = `
     window.__workers = 0; window.__starts = []; window.__blobs = [];
     const createURL = URL.createObjectURL;
@@ -74,6 +75,10 @@ const noService = {
     },
 };
 const server = createServer({
+    libraryDirectory: resolve(
+        ".test-artifacts",
+        "library-melody-editor-" + crypto.randomUUID(),
+    ),
     port: PORT,
     audioImport: noService,
     gameTranscription: noService,
@@ -131,7 +136,7 @@ try {
     await saved();
     const capture = () =>
         browser.evaluate(`(async () => {
-        const {TranscriptionStore}=await import("/src/core/storage/transcription-store.js");
+        const {DiskLibrary:TranscriptionStore}=await import("/src/core/storage/disk-library.js");
         return (await new TranscriptionStore().load()).state.captures[0][1];
     })()`);
     const click = (action) =>
@@ -145,6 +150,28 @@ try {
             n.value=value; n.dispatchEvent(new Event("change"));
         }
     })()`);
+    await click("nextBoundary");
+    await click("previewAfter");
+    await browser.until(
+        `document.getElementById("transcribe-editor").dataset.playing === "piano"`,
+    );
+    await click("stop");
+    assert.equal((await capture()).editedNotes, undefined);
+    await click("acceptBoundary");
+    await saved();
+    assert.deepEqual(
+        (await capture()).editedNotes
+            .slice(1, 3)
+            .map((n) => [n.timeMs, n.durationMs]),
+        [
+            [800, 120],
+            [1020, 180],
+        ],
+    );
+    await click("undo");
+    await saved();
+    assert.equal((await capture()).editedNotes, undefined);
+    assert.equal((await capture()).notes[1].durationMs, 400);
     await fields({ from: "0.2", to: "1.2" });
     await click("source");
     await browser.until(
@@ -158,9 +185,18 @@ try {
     assert.equal(started.args[2], 1);
     await click("piano");
     await browser.until(
+        `document.querySelector('#transcribe-editor [data-index="0"][data-sounding]')`,
+    );
+    await browser.until(
         `document.getElementById("transcribe-editor").dataset.playing === "piano" && document.getElementById("transcribe-editor").textContent.includes("短句播放中")`,
     );
     await click("stop");
+    assert.equal(
+        await browser.evaluate(
+            `document.querySelectorAll('#transcribe-editor [data-sounding]').length`,
+        ),
+        0,
+    );
     assert.equal(
         await browser.evaluate(
             `document.getElementById("transcribe-editor").dataset.playing`,
@@ -289,6 +325,9 @@ try {
         "PASS: split/merge/add/delete, bounded undo, raw reset and persisted edits work without reinference",
     );
     const checkLayout = async (width) => {
+        await browser.evaluate(
+            `(() => { for(const el of document.querySelectorAll("#transcribe-review, #transcribe-editor details")) el.open=true; })()`,
+        );
         await browser.send("Emulation.setDeviceMetricsOverride", {
             width,
             height: 844,
@@ -353,6 +392,14 @@ try {
     result = await capture();
     assert.equal(result.clipMs, 25000);
     assert.equal(result.clipStartMs, 4000);
+    await click("higher");
+    await saved();
+    assert.equal((await capture()).editedNotes[0].note, 61);
+    await click("beat");
+    await browser.until(
+        `document.getElementById("transcribe-editor").dataset.playing === "beat" && window.__starts.at(-1).args[0] > 0`,
+    );
+    await click("stop");
     await browser.evaluate(
         `document.getElementById("transcribe-whole").click()`,
     );
@@ -363,8 +410,88 @@ try {
     result = await capture();
     assert.equal(result.clipMs, 34000);
     assert.equal(result.clipStartMs, 0);
+    await fields({ pitch: "62", start: "5", duration: "0.3" });
+    await click("add");
+    await click("next");
+    assert.equal(
+        await browser.evaluate(
+            `document.querySelector('[data-field="from"]').valueAsNumber`,
+        ),
+        4.85,
+    );
+    await click("previous");
+    assert.equal(
+        await browser.evaluate(
+            `document.querySelector('[data-field="from"]').valueAsNumber`,
+        ),
+        0,
+    );
+    await browser.send("Page.bringToFront");
+    await browser.evaluate(`(() => {
+        document.getElementById("transcribe-audition").scrollIntoView({block:"center"});
+        window.__sawScoreNote=false;
+        const observe=new MutationObserver(()=>{
+            if(document.querySelector("#transcribe-preview [data-sounding]") && document.getElementById("transcribe-sounding").textContent.includes("♪")){
+                window.__sawScoreNote=true;
+                observe.disconnect();
+            }
+        });
+        observe.observe(document.getElementById("transcribe-preview"),{subtree:true,attributes:true});
+        document.querySelector('.transcribe-level[data-level="original"]').click();
+        document.getElementById("transcribe-audition").click();
+    })()`);
+    await browser.until("window.__sawScoreNote");
+    await browser.evaluate(
+        `document.getElementById("transcribe-audition").click()`,
+    );
+    assert.equal(
+        await browser.evaluate(
+            `document.querySelectorAll('[data-sounding]').length`,
+        ),
+        0,
+    );
     console.log(
         "PASS: 25-second trial is capped at the source end, honors the clip start, and can expand to the whole track",
+    );
+    await saved();
+    await browser.send("Page.reload");
+    await browser.until(
+        `document.getElementById("transcribe-storage-status")?.dataset.i18n === "transcribe.storage.restored"`,
+    );
+    await browser.evaluate(`(() => {
+        window.confirm = () => true;
+        const select = document.getElementById("transcribe-clip-history");
+        select.value = "4/25"; select.dispatchEvent(new Event("change"));
+    })()`);
+    await saved();
+    result = await capture();
+    assert.equal(result.clipStartMs, 4000);
+    assert.equal(result.editedNotes[0].note, 61);
+    const badPath = resolve(".test-artifacts/editor-invalid.wav");
+    await writeFile(badPath, "invalid audio");
+    await setFile(badPath);
+    await browser.until(`!document.getElementById("transcribe-error").hidden`);
+    assert.equal(
+        await browser.evaluate(
+            `document.getElementById("transcribe-results").hidden`,
+        ),
+        false,
+    );
+    assert.equal((await capture()).editedNotes[0].note, 61);
+    await browser.evaluate(`(() => {
+        const lib = document.getElementById("transcribe-library");
+        lib.value = Array.from(lib.options).find(o=>o.value && o.value!==lib.value).value; lib.dispatchEvent(new Event("change"));
+    })()`);
+    await browser.until(
+        `document.getElementById("transcribe-source-name").textContent === "editor-source.wav"`,
+    );
+    await browser.until(
+        'document.getElementById("transcribe-storage-status").dataset.i18n==="transcribe.storage.restored"',
+    );
+    assert.equal((await capture()).clipMs, 3500);
+    assert.equal(await browser.evaluate("window.__workers"), 0);
+    console.log(
+        "PASS: beat preview, quick edits, persisted trial revisions, failed imports and local song library",
     );
     assert.deepEqual(browser.errors, []);
     console.log(

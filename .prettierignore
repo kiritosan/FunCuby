@@ -2,3 +2,5 @@ node_modules/
 .test-artifacts/
 vendor/
 LICENSE
+
+.funcuby-library/

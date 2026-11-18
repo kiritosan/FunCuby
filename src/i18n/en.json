@@ -1,7 +1,13 @@
 {
   "settings": {
-    "theme": { "label": "Appearance", "light": "Light", "dark": "Dark" },
-    "locale": { "label": "Language" }
+    "theme": {
+      "label": "Appearance",
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "locale": {
+      "label": "Language"
+    }
   },
   "nav": {
     "label": "Pages",
@@ -29,7 +35,10 @@
     "untitledTrack": "Track {number}",
     "sentenceGap": " "
   },
-  "format": { "timestamp": "With timestamp", "legacy": "No timestamp" },
+  "format": {
+    "timestamp": "With timestamp",
+    "legacy": "No timestamp"
+  },
   "fields": {
     "value": "Value",
     "channel": "Channel",
@@ -256,7 +265,9 @@
     }
   },
   "send": {
-    "structured": { "title": "Structured message" },
+    "structured": {
+      "title": "Structured message"
+    },
     "command": {
       "label": "Action",
       "on": "Note on",
@@ -277,7 +288,10 @@
       "hintAfter": "waits 101 ms after the previous packet is written before running the next line; decimals allowed, 0–60000 ms. Blank lines are ignored and every line is validated before sending. “Cancel pending” aborts the wait and anything after it.",
       "submit": "Send line by line"
     },
-    "pending": { "label": "Pending tasks", "empty": "No pending tasks" },
+    "pending": {
+      "label": "Pending tasks",
+      "empty": "No pending tasks"
+    },
     "cancel": "Cancel pending",
     "written": "Written; this is not an acknowledgement from the device.",
     "rawDone": {
@@ -335,7 +349,10 @@
       "minDuration": "{name} shortest note (ms)",
       "minGap": "{name} skip-release threshold (ms)"
     },
-    "mode": { "pressOnly": "Note on only", "paired": "Note on and off" },
+    "mode": {
+      "pressOnly": "Note on only",
+      "paired": "Note on and off"
+    },
     "hint": {
       "lengthen": "Short notes are first stretched to the shortest note length, then overlapping releases of the same pitch are merged",
       "gap": "A release is skipped when the next press on the same channel and pitch follows within the threshold",
@@ -384,9 +401,15 @@
     "tracks": {
       "title": "Practice tracks",
       "empty": "Upload a MIDI file first",
-      "selected": { "one": "{count} selected", "other": "{count} selected" },
+      "selected": {
+        "one": "{count} selected",
+        "other": "{count} selected"
+      },
       "none": "None selected",
-      "notes": { "one": "{count} note", "other": "{count} notes" }
+      "notes": {
+        "one": "{count} note",
+        "other": "{count} notes"
+      }
     },
     "difficulty": {
       "title": "Timing difficulty",
@@ -429,8 +452,14 @@
       "beatLabel": "{track}, {position}",
       "noteTitle": "{track} · {note} · {key} · beat {beat}",
       "page": "Page {page} / {pages} · {bars} · {tracks} · {perRow} bars per row",
-      "bars": { "one": "{count} bar", "other": "{count} bars" },
-      "tracks": { "one": "{count} track", "other": "{count} tracks" }
+      "bars": {
+        "one": "{count} bar",
+        "other": "{count} bars"
+      },
+      "tracks": {
+        "one": "{count} track",
+        "other": "{count} tracks"
+      }
     },
     "loop": {
       "label": "Loop",
@@ -536,13 +565,13 @@
       "saving": "Saving locally; please wait before refreshing…",
       "saved": "Saved locally; refresh or reopen to continue",
       "restored": "Local audio and completed transcriptions restored without fetching or inference",
-      "unavailable": "Local save or restore failed, possibly due to quota or browser restrictions. You can continue, but download MIDI as a backup; saving could not be confirmed.",
+      "unavailable": "Could not read or write the library. Check the local server and free disk space. You can still export your edits as MIDI.",
       "conflict": "Another tab replaced or deleted the saved work. This tab will not overwrite it automatically; reimport to save this song.",
       "clearing": "Deleting local saved work…",
       "deleteFailed": "Deletion failed. Saved data may still remain; please retry.",
       "clear": "Delete Saved Work And Clear Song",
-      "confirmClear": "Delete this browser's saved audio, transcriptions and settings, and clear the current song? Downloaded MIDI files are unaffected.",
-      "hint": "The most recently imported song, completed modes and settings are saved automatically, without autoplay or automatic inference. Use the same browser and address (including port). Private windows, clearing site data or browser eviction can remove saved work. A new song replaces the previous save."
+      "confirmClear": "Delete this song, its audio, stems, clips and scores from the disk library?",
+      "hint": "Each song has its own folder with its source audio, available vocal stems, MIDI scores and editable draft."
     },
     "clipStart": "Clip start (s)",
     "clipLength": "Clip length (s)",
@@ -585,7 +614,10 @@
     "previewFix": "Fix the settings above to preview the notes.",
     "emptyVersion": "This version has no notes — try another level.",
     "previewMore": "+{count} more",
-    "notesCount": { "one": "{count} note", "other": "{count} notes" },
+    "notesCount": {
+      "one": "{count} note",
+      "other": "{count} notes"
+    },
     "engine": "Transcription mode",
     "engineBasic": "Browser · Instruments",
     "engineGame": "GAME · Clear vocals",
@@ -632,7 +664,7 @@
     "downloadOriginal": "Download working melody MIDI",
     "editor": {
       "title": "Melody Review And Editing",
-      "hint": "The source, isolated vocals and piano draft use the same phrase. Play each one or listen in sequence. Loop repeats the selected playback. Times are relative to the current clip, with up to 30 seconds per phrase.",
+      "hint": "Previous and next phrases follow rests. Adjust the clip-relative endpoints (up to 30 seconds) to loop the source, vocals or piano. Sounding piano notes light up.",
       "from": "Phrase start (s)",
       "to": "Phrase end (s)",
       "loop": "Loop phrase",
@@ -645,6 +677,15 @@
       "stop": "Stop phrase",
       "previous": "Previous phrase",
       "next": "Next phrase",
+      "nextBoundary": "Jump to a possible rest",
+      "rest": "Rest",
+      "earlyRelease": "possible early release",
+      "samePitchRestart": "possible repeated note",
+      "releaseDetail": "Listen for a rest starting at {at} s.",
+      "repeatDetail": "Listen for a release at {at} s and a repeated note at {again} s.",
+      "previewBefore": "Hear current notes",
+      "previewAfter": "Hear suggested notes",
+      "acceptBoundary": "Apply this suggestion",
       "loading": "Preparing playback",
       "playing": "Playing phrase",
       "stopped": "Phrase stopped",
@@ -672,13 +713,19 @@
       "invalidRange": "Choose valid endpoints inside the clip, 0.1–30 seconds apart.",
       "invalidEdit": "Invalid edit: integer pitch 0-127 and timing within the clip required. Splits need 20 ms on both sides; merges need adjacent equal pitches at most 250 ms apart.",
       "confirmReset": "Restore the unedited recognizer notes? You can undo this operation; audio is unaffected.",
-      "confirmClip": "Changing the transcription clip clears completed modes and manual edits. Continue? Export a review draft first for a backup.",
-      "confirmRerun": "Retranscribing replaces this mode's recognition and manual edits. Continue? Export the review draft first for a backup."
+      "confirmClip": "Switch clips? The current transcription and edits will be available under Saved clip versions.",
+      "confirmRerun": "Retranscribing replaces this mode's recognition and manual edits. Continue? Export the review draft first for a backup.",
+      "lower": "Down a semitone",
+      "higher": "Up a semitone",
+      "shorter": "Shorten 50 ms",
+      "longer": "Lengthen 50 ms",
+      "precise": "Exact values, split and merge",
+      "beat": "Source with beat clicks",
+      "timestamps": "Song {source} s · clip {clip} s"
     },
     "practice": "Send to Practice",
     "assumptions": "Piano audition uses local Salamander samples (Alexander Holm, CC BY 3.0). Listening dynamics do not change MIDI velocities. Working melody includes manual edits; unedited recognizer MIDI is separately downloadable. BPM and 4/4 remain draft assumptions; arranged playback is not synchronized with the source.",
     "notesTitle": "How this works",
-    "notesBody": "Notes are detected locally by Spotify Basic Pitch running in a web worker. For songs with several instruments the picker keeps the highest-pitched voice as a heuristic — it is not reliable vocal separation, and complex mixes may need a cleaner source or manual checking. Starter omits chromatic (black-key) notes instead of moving them; octave folding may move whole passages by octaves. Transcription is a draft for practice, not a guarantee of correctness.",
     "url": {
       "label": "Bilibili or YouTube video URL",
       "placeholder": "https://www.bilibili.com/video/BV… or https://www.youtube.com/watch?v=…",
@@ -754,6 +801,47 @@
       "firstNote": "The device maps to MIDI note {note}, which leaves no room for a full 25-key range. Adjust the device offset or transpose range.",
       "settings": "Check the arrangement settings (BPM 20–240, transpose −12…+12, origin inside the clip, valid pitch range).",
       "noAudio": "This browser does not support Web Audio."
+    },
+    "setup": "Source and transcription",
+    "modeGuide": "When to use each mode",
+    "savedClips": "Saved clip versions",
+    "returnClip": "Return to a clip",
+    "library": "Local songs",
+    "openSong": "Open a saved song",
+    "reviewOptions": "Compare and edit melody",
+    "arrangeSettings": "Adjust tempo, key and arrangement",
+    "compareWorking": "Compare the unsimplified melody",
+    "reviewCues": "Review a possible release ({count} to check)",
+    "version": "{song} · {name} · {count} notes · {bpm} BPM",
+    "playVersion": "Play {name}",
+    "method": {
+      "basic-pitch": "Basic Pitch detects notes in the browser. Simplification tracks a lead line through the candidates.",
+      "game": "GAME transcribes singing directly on this computer. Use it for clear vocals. The installed GAME weights are for noncommercial use.",
+      "game-separated": "UVR isolates vocals locally before GAME transcribes the melody. Listen to the stem to check the separation. The installed GAME weights are for noncommercial use."
+    },
+    "usePosition": "Use source playback position as clip start",
+    "diagnosticOptions": "Troubleshoot transcription",
+    "engineDisabled": "This installation uses browser transcription. GAME models are disabled.",
+    "disk": {
+      "links": "Add video links",
+      "linkHint": "One Bilibili or YouTube video URL per line",
+      "importLinks": "Fetch audio and queue songs",
+      "batch": "Batch transcription",
+      "batchHint": "Choose a mode and add full songs together. Two can run at once. Keep this page open until the queue finishes.",
+      "add": "Add songs and transcribe",
+      "location": "Library folder on disk",
+      "saving": "Writing to disk…",
+      "queued": "Queued",
+      "running": "Transcribing",
+      "done": "Score saved",
+      "failed": "Transcription failed",
+      "cancelled": "Cancelled",
+      "open": "Open score",
+      "cancel": "Cancel",
+      "retry": "Retry",
+      "waitingSlot": "Waiting for a local inference slot…",
+      "stemFailed": "Could not save or read the vocal file. Check the library folder and disk space.",
+      "missing": "The source audio could not be found in the disk library."
     }
   },
   "logs": {
@@ -797,7 +885,9 @@
       "failed": "Failed",
       "cancelled": "Cancelled"
     },
-    "event": { "state": "{state} tick={tick} · EP1 unverified" },
+    "event": {
+      "state": "{state} tick={tick} · EP1 unverified"
+    },
     "details": "Details",
     "detail": {
       "title": "Packet details",

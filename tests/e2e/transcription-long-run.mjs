@@ -144,11 +144,12 @@ try {
             });
             socket.send(JSON.stringify({ id, method, params }));
         });
-    const evaluate = async (expression) => {
+    const evaluate = async (expression, userGesture = false) => {
         const result = await send("Runtime.evaluate", {
             expression,
             awaitPromise: true,
             returnByValue: true,
+            userGesture,
         });
         if (result.exceptionDetails)
             throw new Error(JSON.stringify(result.exceptionDetails));
@@ -272,9 +273,14 @@ try {
         nodeId: root.nodeId,
         selector: "#transcribe-file",
     });
+    const oldSource = await evaluate(
+        'document.getElementById("transcribe-source").src',
+    );
     await send("DOM.setFileInputFiles", { nodeId, files: [fixture] });
     assert.ok(
-        await until("!document.getElementById('transcribe-clip').hidden"),
+        await until(
+            `!document.getElementById("transcribe-run").disabled && document.getElementById("transcribe-source").src !== ${JSON.stringify(oldSource)}`,
+        ),
         "Long audio did not decode",
     );
     await evaluate(`(() => {
@@ -378,9 +384,12 @@ try {
         })()`),
             "Isolated audio controls were not shown",
         );
-        report.vocals = await evaluate(`(async () => {
+        await send("Page.bringToFront");
+        report.vocals = await evaluate(
+            `(async () => {
             const audio = document.getElementById("transcribe-vocals-audio");
             const link = document.getElementById("transcribe-vocals-download");
+            audio.scrollIntoView({ block: "center" });
             try {
                 await Promise.race([
                     audio.play(),
@@ -395,7 +404,9 @@ try {
                 await new Promise(resolve => setTimeout(resolve, 50));
             audio.pause();
             return { duration: audio.duration, played: audio.currentTime > 0, link: link.download };
-        })()`);
+        })()`,
+            true,
+        );
         assert.equal(
             report.vocals.error,
             undefined,
@@ -405,6 +416,7 @@ try {
         assert.equal(report.vocals.played, true);
         assert.match(report.vocals.link, /vocals\.wav$/);
         report.phraseSequence = await evaluate(`(async () => {
+            document.getElementById("transcribe-review").open = true;
             const editor = document.getElementById("transcribe-editor");
             const get = (key) => editor.querySelector('[data-field="' + key + '"]');
             get("from").value = "0.2";
@@ -420,6 +432,7 @@ try {
                 await new Promise(resolve => setTimeout(resolve, 25));
             }
             editor.querySelector('[data-action="stop"]').click();
+            document.getElementById("transcribe-review").open = false;
             return tracks;
         })()`);
         assert.deepEqual(report.phraseSequence, [
@@ -597,17 +610,10 @@ try {
             ),
             false,
         );
-        assert.equal(
-            await evaluate(
-                'document.getElementById("transcribe-vocals").hidden',
+        assert.ok(
+            await until(
+                `!document.getElementById("transcribe-vocals").hidden && !document.querySelector('#transcribe-editor [data-action="vocals"]').disabled`,
             ),
-            true,
-        );
-        assert.equal(
-            await evaluate(
-                "document.querySelector('#transcribe-editor [data-action=\"vocals\"]').disabled",
-            ),
-            true,
         );
         assert.deepEqual(
             await evaluate(`["bpm", "origin", "transpose"].map(

@@ -343,3 +343,123 @@
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent) inset;
 }
+
+.melody-sounding {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+.melody-sounding:empty {
+    display: none;
+}
+.melody-editor-list button[data-sounding],
+.transcribe-note[data-sounding] {
+    background: var(--primary);
+    color: var(--on-primary, white);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+}
+
+#panel-transcribe details > summary {
+    cursor: pointer;
+    padding-block: 0.55rem;
+}
+#panel-transcribe details > .play-controls,
+#transcribe-editor details > .play-controls {
+    margin-block: 0.75rem;
+}
+#panel-transcribe select {
+    max-width: 100%;
+}
+#transcribe-version {
+    margin: 0.5rem 0;
+    overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+    .transcribe-levels {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .transcribe-level-desc {
+        display: none;
+    }
+}
+.song-library .library-heading,
+.song-library .batch-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 0.75rem 1.25rem;
+}
+.library-heading h2 {
+    margin: 0;
+    align-self: center;
+    flex: 1;
+}
+.song-library label {
+    margin: 0;
+    min-width: 0;
+}
+.song-library .library-heading select {
+    width: min(100%, 24rem);
+}
+.song-library details {
+    border-top: 1px solid var(--line);
+    margin-top: 0.75rem;
+}
+.song-library summary {
+    font-weight: 600;
+}
+.library-location code {
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+.batch-links textarea {
+    width: 100%;
+    resize: vertical;
+    margin-block: 0.4rem;
+}
+#transcribe-batch-list {
+    max-height: 20rem;
+    overflow-y: auto;
+    padding: 0;
+    margin: 0.5rem 0 0;
+    list-style: none;
+}
+#transcribe-batch-list:empty {
+    display: none;
+}
+#transcribe-batch-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.65rem 0;
+    border-top: 1px solid var(--line);
+}
+#transcribe-batch-list li > div {
+    display: grid;
+    gap: 0.2rem;
+    overflow-wrap: anywhere;
+    min-width: 0;
+}
+#transcribe-batch-list span {
+    font-size: 0.9rem;
+}
+#transcribe-batch-list button {
+    flex: none;
+}
+#transcribe-batch-list [data-state="running"] strong {
+    color: var(--primary);
+}
+@media (max-width: 600px) {
+    .song-library .library-heading {
+        display: grid;
+        align-items: stretch;
+    }
+    .song-library .batch-controls {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    }
+    .batch-controls button {
+        grid-column: 1/-1;
+    }
+}

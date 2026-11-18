@@ -73,6 +73,7 @@ export function evaluateNotes(reference, detected) {
     const extras = unmatched(detected, exact, 1);
     const octaves = matchNotes(missing, extras, (note) => note.note % 12);
     let longNotes = 0,
+        earlyReleases = 0,
         onsetError = 0,
         offsetError = 0;
     for (const [i, j] of exact) {
@@ -85,6 +86,11 @@ export function evaluateNotes(reference, detected) {
             Math.max(150, expected.durationMs * 0.5)
         )
             longNotes++;
+        if (
+            endTime(expected) - endTime(actual) >
+            Math.max(100, expected.durationMs * 0.25)
+        )
+            earlyReleases++;
     }
     const ratio = (numerator, denominator) =>
         denominator ? round(numerator / denominator) : null;
@@ -95,6 +101,7 @@ export function evaluateNotes(reference, detected) {
         missed: missing.length,
         extra: extras.length,
         longNotes,
+        earlyReleases,
         octaveErrors: octaves.filter(
             ([i, j]) => missing[i].note !== extras[j].note,
         ).length,
@@ -161,5 +168,38 @@ export function evaluateStarter(reference, detected, settings) {
         mainKeyOmissions: actual.stats.omittedMainKeys,
         notes: evaluateNotes(expected.notes, actual.notes),
         playability: starterPlayability(actual.notes, settings.firstNote),
+    };
+}
+
+// Compare the selected melody on the source timeline, allowing the two
+// playable versions to use different practice tempos, keys and octaves.
+export function evaluateAutoStarter(
+    reference,
+    detected,
+    referenceSettings,
+    actualSettings,
+) {
+    function arrange(notes, settings) {
+        const result = arrangeTranscription(notes, {
+            ...settings,
+            level: "starter",
+        });
+        const sourceScale = result.bpm / result.sourceBpm;
+        return {
+            playable: starterPlayability(result.notes, settings.firstNote),
+            source: result.notes.map((n) => ({
+                ...n,
+                note: (((n.note - settings.transpose) % 12) + 12) % 12,
+                timeMs: n.timeMs * sourceScale + settings.originMs,
+                durationMs: n.durationMs * sourceScale,
+            })),
+        };
+    }
+    const expected = arrange(reference, referenceSettings);
+    const actual = arrange(detected, actualSettings);
+    return {
+        settings: actualSettings,
+        pitchClassOnset: evaluateNotes(expected.source, actual.source),
+        playability: actual.playable,
     };
 }

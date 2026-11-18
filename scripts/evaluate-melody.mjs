@@ -9,11 +9,15 @@ import {
     GAME_LANGUAGES,
     TRANSCRIPTION_ENGINES,
 } from "../src/core/transcription/config.js";
-import { validateMelody } from "../src/core/transcription/melody-edit.js";
+import {
+    applyVocalBoundary,
+    validateMelody,
+} from "../src/core/transcription/melody-edit.js";
 import { analyzeMelody } from "../src/core/transcription/musical-analysis.js";
 import { openTestBrowser } from "../tests/e2e/browser.mjs";
 import {
     evaluateNotes,
+    evaluateAutoStarter,
     evaluateStarter,
     ONSET_TOLERANCE_MS,
 } from "./melody-metrics.mjs";
@@ -213,10 +217,34 @@ try {
                     }`,
                 );
             const notes = terminal.notes;
+            let autoSettings = null;
+            if (notes.length) {
+                await browser.until(
+                    `!document.getElementById("transcribe-results").hidden && !document.getElementById("transcribe-run").disabled`,
+                );
+                autoSettings = await browser.evaluate(`(() => {
+                    document.getElementById("transcribe-auto-fit").click();
+                    const value = id => Number(document.getElementById("transcribe-" + id).value);
+                    return { firstNote: 60, bpm: value("bpm"), originMs: value("origin"), transpose: value("transpose") };
+                })()`);
+            }
+            const proposed = notes.flatMap(applyVocalBoundary);
             const references = item.references.map((reference) => ({
                 label: reference.label,
                 recognition: evaluateNotes(reference.notes, notes),
+                withBoundarySuggestions: evaluateNotes(
+                    reference.notes,
+                    proposed,
+                ),
                 starter: evaluateStarter(reference.notes, notes, settings),
+                automaticStarter:
+                    autoSettings &&
+                    evaluateAutoStarter(
+                        reference.notes,
+                        notes,
+                        settings,
+                        autoSettings,
+                    ),
             }));
             entry.candidates[engine] = {
                 backend,

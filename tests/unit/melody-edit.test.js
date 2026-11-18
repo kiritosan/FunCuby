@@ -7,12 +7,64 @@ import {
 } from "../../src/core/transcription/melody-edit.js";
 import { createPhrasePlayer } from "../../src/ui/transcribe/phrase-player.js";
 import { decodeVocalPhrase } from "../../src/ui/transcribe/vocal-phrase.js";
+import { phraseRanges } from "../../src/core/transcription/phrase-ranges.js";
+import { encodeResult } from "../../src/core/transcription/protocol.js";
 
 const note = (pitch, timeMs, durationMs) => ({
     note: pitch,
     timeMs,
     durationMs,
     velocity: 90,
+});
+
+test("practice phrases use rests shared by all voices and bounded continuous passages", () => {
+    const notes = [
+        note(60, 100, 2900),
+        note(64, 400, 200),
+        note(65, 2000, 400),
+        note(62, 4100, 500),
+    ];
+    assert.deepEqual(phraseRanges(notes, 7000), [
+        { start: 0, end: 3150 },
+        { start: 3950, end: 4750 },
+    ]);
+    const long = phraseRanges([note(60, 0, 65000)], 65000);
+    assert.equal(long[0].start, 0);
+    assert.equal(long.at(-1).end, 65000);
+    assert.ok(
+        long.every(
+            (r, i) =>
+                r.end - r.start <= 30000 && (!i || r.start === long[i - 1].end),
+        ),
+    );
+});
+
+test("a reviewed vocal rest survives transport and stays attached only to its original note", () => {
+    const event = {
+        ...note(63, 100, 600),
+        boundary: { releaseMs: 180, repeatMs: 330 },
+    };
+    const raw = encodeResult({ jobId: 1, notes: [event] }).notes;
+    assert.deepEqual(raw, [event]);
+    assert.deepEqual(editMelody(raw, { type: "boundary", index: 0 }, 1000), [
+        note(63, 100, 180),
+        note(63, 430, 270),
+    ]);
+    const manual = editMelody(
+        raw,
+        { type: "update", index: 0, note: { durationMs: 200 } },
+        1000,
+    );
+    assert.equal(manual[0].boundary, undefined);
+    assert.deepEqual(raw[0].boundary, event.boundary);
+    for (const boundary of [
+        { releaseMs: -2 },
+        { releaseMs: 900 },
+        { releaseMs: 180, repeatMs: 170 },
+    ])
+        assert.throws(() =>
+            encodeResult({ jobId: 1, notes: [{ ...event, boundary }] }),
+        );
 });
 
 test("melody editing preserves the recognizer snapshot and phrase timing", () => {

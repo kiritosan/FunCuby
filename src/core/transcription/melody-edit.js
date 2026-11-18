@@ -20,12 +20,35 @@ export function validateMelody(notes, clipMs) {
 
 // Editing is deliberately unquantized. Every command returns a new snapshot;
 // recognizer notes remain immutable and polyphony is not silently discarded.
+export function applyVocalBoundary(note) {
+    const { boundary, ...original } = note;
+    if (!boundary) return [original];
+    const first = { ...original, durationMs: boundary.releaseMs };
+    if (boundary.repeatMs === undefined) return [first];
+    return [
+        first,
+        {
+            ...original,
+            timeMs: original.timeMs + boundary.repeatMs,
+            durationMs: original.durationMs - boundary.repeatMs,
+        },
+    ];
+}
+
 export function editMelody(input, command, clipMs) {
     const notes = input.map((n) => ({ ...n }));
     const selected = notes[command.index];
     if (command.type !== "add" && !selected)
         throw new RangeError("Select a note");
+    // Any manual change to a note invalidates evidence tied to its old bounds.
+    if (selected && command.type !== "boundary" && command.type !== "add")
+        delete selected.boundary;
     switch (command.type) {
+        case "boundary":
+            if (!selected.boundary)
+                throw new RangeError("No boundary suggestion");
+            notes.splice(command.index, 1, ...applyVocalBoundary(selected));
+            break;
         case "update":
             notes[command.index] = { ...selected, ...command.note };
             break;
@@ -86,7 +109,7 @@ export function editMelody(input, command, clipMs) {
     );
 }
 
-export function phraseNotes(notes, fromMs, toMs) {
+export function phraseNotes(notes, fromMs, toMs, includeIndex = false) {
     if (
         !Number.isFinite(fromMs) ||
         !Number.isFinite(toMs) ||
@@ -94,11 +117,20 @@ export function phraseNotes(notes, fromMs, toMs) {
         toMs <= fromMs
     )
         throw new RangeError("Invalid phrase");
-    return notes.flatMap((n) => {
+    return notes.flatMap((n, index) => {
         const from = Math.max(fromMs, n.timeMs);
         const to = Math.min(toMs, n.timeMs + n.durationMs);
         return to > from
-            ? [{ ...n, timeMs: from - fromMs, durationMs: to - from }]
+            ? [
+                  {
+                      ...n,
+                      ...(includeIndex && {
+                          displayIndex: n.displayIndex ?? index,
+                      }),
+                      timeMs: from - fromMs,
+                      durationMs: to - from,
+                  },
+              ]
             : [];
     });
 }
@@ -109,6 +141,12 @@ export function reviewFlags(notes, index) {
         previous = notes[index - 1],
         flags = [];
     if (n.durationMs < 100) flags.push("short");
+    if (n.boundary)
+        flags.push(
+            n.boundary.repeatMs === undefined
+                ? "earlyRelease"
+                : "samePitchRestart",
+        );
     if (previous && Math.abs(n.note - previous.note) >= 12) flags.push("leap");
     if (previous && previous.timeMs + previous.durationMs > n.timeMs + 20)
         flags.push("overlap");

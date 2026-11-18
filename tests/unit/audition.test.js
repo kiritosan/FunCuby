@@ -27,7 +27,8 @@ const note = (timeMs = 0) => ({
 function rig({ load } = {}) {
     const sources = [],
         gains = [],
-        clocks = new Set();
+        clocks = new Set(),
+        frames = new Set();
     const parameter = () => ({
         value: 0,
         values: [],
@@ -100,6 +101,13 @@ function rig({ load } = {}) {
         () => {},
         {
             bank,
+            requestFrame(fn) {
+                frames.add(fn);
+                return fn;
+            },
+            cancelFrame(fn) {
+                frames.delete(fn);
+            },
             setTimer(fn) {
                 clocks.add(fn);
                 return fn;
@@ -109,8 +117,50 @@ function rig({ load } = {}) {
             },
         },
     );
-    return { player, context, sources, gains, clocks };
+    return { player, context, sources, gains, clocks, frames };
 }
+
+test("score preview skips a silent intro while keeping later rests and source timestamps", async () => {
+    const r = rig();
+    const notes = [note(15000), note(16000)];
+    const { startAt } = await r.player.play(notes, { skipIntro: true });
+    assert.deepEqual(
+        r.sources.map((s) => s.starts),
+        [[startAt]],
+    );
+    r.context.currentTime = startAt + 0.8;
+    for (const tick of r.clocks) tick();
+    assert.deepEqual(r.sources[1].starts, [startAt + 1]);
+    assert.equal(notes[0].timeMs, 15000);
+    r.player.stop();
+});
+
+test("piano highlights follow sounding voices across chords, rest and loop, independent of lookahead", async () => {
+    const r = rig(),
+        updates = [];
+    const { startAt } = await r.player.play(
+        [note(), { ...note(100), note: 64 }],
+        {
+            durationMs: 500,
+            loop: true,
+            onSounding: (voices) =>
+                updates.push(voices?.map((v) => v.note) ?? null),
+        },
+    );
+    const at = (ms) => {
+        r.context.currentTime = startAt + ms / 1000;
+        for (const fn of r.clocks) fn();
+        for (const fn of [...r.frames]) {
+            r.frames.delete(fn);
+            fn();
+        }
+    };
+    assert.deepEqual(updates, []);
+    for (const ms of [1, 110, 310, 420, 505]) at(ms);
+    r.player.stop();
+    assert.deepEqual(updates, [[60], [60, 64], [64], [], [60], null]);
+    assert.equal(r.frames.size, 0);
+});
 
 test("stopping during context resume cannot start late notes", async () => {
     const resume = deferred();

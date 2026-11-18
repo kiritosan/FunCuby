@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+    evaluateAutoStarter,
     evaluateNotes,
     evaluateStarter,
     starterPlayability,
@@ -34,6 +35,10 @@ test("a long note only matches one repeat and octave errors stay in the miss/ext
     assert.equal(result.octaveErrors, 1);
     assert.equal(result.onsetMeanAbsMs, 30);
     assert.equal(result.f1, 0.5);
+    assert.equal(
+        evaluateNotes([note(60, 0, 500)], [note(60, 0, 300)]).earlyReleases,
+        1,
+    );
 });
 
 test("note pairing maximizes coverage before preferring small onset errors", () => {
@@ -65,6 +70,14 @@ test("starter measures the calibrated main keys, overlap and spacing", () => {
     });
     assert.equal(result.notes.f1, 1);
     assert.equal(result.playability.mainKeySolo, true);
+    const settings = { firstNote: 62, bpm: 100, originMs: 0, transpose: 0 };
+    assert.equal(
+        evaluateAutoStarter(phrase, phrase, settings, {
+            ...settings,
+            transpose: 12,
+        }).pitchClassOnset.f1,
+        1,
+    );
     assert.equal(starterPlayability([], 62).mainKeySolo, false);
     assert.equal(
         starterPlayability([note(62, 0, 400 + 1e-9), note(64, 400)], 62)

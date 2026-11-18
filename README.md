@@ -35,23 +35,19 @@ For Bluetooth connections, use a browser that supports Web Bluetooth, such as Ch
 
 After transcription, **Auto Tempo + Main-Key Fit** estimates BPM and beat origin and suggests a transpose for the keyboard's main keys. **Original Key** sets transpose to zero. You can edit these settings, audition four arrangement levels, download MIDI, or open a score in Practice. Inference runs entirely on your device and can be cancelled.
 
-The progress panel shows preparation, model loading, completed processing windows and note extraction. UVR + GAME shows separation and transcription independently. When UVR finishes, you can play or download the isolated stereo WAV while GAME continues. The vocal preview is cleared on reload.
+The progress panel shows preparation, model loading, completed processing windows and note extraction. UVR + GAME shows separation and transcription independently. When UVR finishes, you can play or download the isolated stereo WAV while GAME continues. Reopening the clip restores its saved vocal preview.
 
 You can also paste a public Bilibili or YouTube video link and click **Fetch audio**. The local server downloads and normalizes the audio with yt-dlp + ffmpeg, then hands it to the same file pipeline — transcription still only runs when you click Start. This needs internet access, the local `npm start` server, and yt-dlp plus ffmpeg/ffprobe (see [docs/url-import.md](docs/url-import.md) for setup). It uses no cookies, no login, and no DRM or access-control bypass — only fetch content you are allowed to download.
 
-The last successfully imported song, completed mode captures and editing settings
-are saved automatically in browser IndexedDB. Wait for **Saved locally**, then
-refresh or reopen the browser/server to continue without fetching or inference.
-A new song replaces the previous save; deletion requires confirmation. Use the
-same browser and address (including port); clearing site data, private windows
-or browser eviction can remove saved work. Keep important MIDI backups. See
-[melody quality and local storage](docs/melody-quality.md).
+The local Node server saves each song in `.funcuby-library/` in the project. Set `FUNCUBY_LIBRARY_DIR` to choose another directory before starting the server. Each song contains the original audio, available vocal WAVs, editable notes and MIDI files for each difficulty. Batch transcription processes up to two full songs concurrently. Keep the tab open until the queue finishes. Piano score previews start at the first note. Short phrase comparisons and exported MIDI keep their timing.
 
 Use **Try 25 seconds** to transcribe a short sample from the current start, then
 **Transcribe whole track** when ready. In melody review you can play the same
 phrase from the source, isolated vocals and piano draft in a loop. Edits to
 pitch, timing, splits and merges update all difficulty versions and are saved
-separately from the recognizer notes. See the [local benchmark](docs/melody-evaluation.md)
+separately from the recognizer notes. After a new GAME run, **Jump to a possible
+rest** focuses on a suggested release or repeated note. Audition the current
+and suggested versions before applying the edit. See the [local benchmark](docs/melody-evaluation.md)
 for reference-based evaluation.
 
 Transcription uses [Spotify Basic Pitch](https://github.com/spotify/basic-pitch-ts) and [TensorFlow.js](https://github.com/tensorflow/tfjs), bundled locally under `vendor/` (gitignored, rebuilt by `npm start`). Both are Apache-2.0; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Personal use does not remove license obligations. The job/worker/diagnostics design is documented in [docs/transcription-architecture.md](docs/transcription-architecture.md).
@@ -93,20 +89,19 @@ npm start
 
 转写完成后，可用「自动节拍 + 全大键适配」估算 BPM、节拍原点和适合大键的移调量。「还原原调」将移调设回 0。你也可以手动调整参数，试听入门、基础、进阶、原始四档谱，下载 MIDI 或直接跟练。推理全程在本机运行，可随时取消。
 
-进度面板显示音频准备、模型加载、已完成窗口和音符整理。「本机精扒」分别显示 UVR 分离和 GAME 转写。分离完成后可在转写期间试听或下载双声道人声 WAV。刷新页面会清除试听，下载的 WAV 可单独保留。
+进度面板显示音频准备、模型加载、已完成窗口和音符整理。「本机精扒」分别显示 UVR 分离和 GAME 转写。分离完成后即可试听双声道人声 WAV，重新打开该片段也能回听。钢琴整谱试听从第一个音符进入，短句对照和 MIDI 导出保留原有时间位置。
 
 也可以在「扒谱」中粘贴公开的 B 站或 YouTube 视频链接并点击「获取音频」。本地服务器会通过 yt-dlp + ffmpeg 下载并规范化音频，然后走与文件导入相同的流程——识别仍需手动点击开始。该功能需要联网、本地 `npm start` 服务，以及 yt-dlp 和 ffmpeg/ffprobe（安装方法见 [docs/url-import.md](docs/url-import.md)）。不使用 Cookie、登录，也不绕过 DRM 或访问控制——请仅下载你有权获取的内容。
 
-扒谱页会自动保存最近一次成功导入的音频、各转写模式结果和编辑设置。
-看到“已保存到本机”后，刷新页面或重启服务、浏览器，可以继续使用，
-无需重新获取音频或重新识别。新歌曲会替换上一次保存；删除按钮需要确认。
-请固定使用同一浏览器和地址（建议 `http://127.0.0.1:5173/#transcribe`）。
-无痕模式、清理站点数据或浏览器回收空间可能删除保存，重要 MIDI 仍建议备份。
+「本机曲库」按歌曲把原音频、分离人声、识别稿、修订和各难度 MIDI 保存在项目的 `.funcuby-library/` 目录。启动前设置 `FUNCUBY_LIBRARY_DIR` 可以更改目录。页面的「磁盘保存位置」显示实际路径。使用原浏览器和地址打开新版时，已有的浏览器草稿会复制到磁盘。
+
+在「批量扒谱」选好模式与语言，可以一次添加多首本地音频，也可以每行粘贴一个 B 站或 YouTube 视频链接。链接按加入顺序获取，最多两首同时解析，其余等待。每首有独立的进度和结果，处理期间请保持页面打开。换歌后可以从曲库打开旧谱，切换片段后可以找回对应修订。
 详情见[旋律质量与本机保存说明](docs/melody-quality.md)。
 
 「试扒 25 秒」从当前片段起点快速出谱，之后可点「转写整首」。在「旋律核对与修订」
 中，可以在同一短句范围依次循环试听原曲、分离人声和钢琴草稿，并修改音高、时值、
 拆分或合并同音。修订会更新各难度并保存在本机，原始识别稿单独保留。
+重新运行 GAME 后，有候选停顿的片段会显示「跳到收音疑点」。可对比当前弹法和建议弹法，逐条采用收音或同音重起建议，也可以撤销。
 识别质量可用[本机基准评测](docs/melody-evaluation.md)追踪。
 
 转写功能使用 [Spotify Basic Pitch](https://github.com/spotify/basic-pitch-ts) 与 [TensorFlow.js](https://github.com/tensorflow/tfjs)，打包在本地 `vendor/` 目录（已被 gitignore，由 `npm start` 重新生成）。两者均为 Apache-2.0 协议，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。个人使用并不免除许可义务。任务/Worker/诊断设计见 [docs/transcription-architecture.md](docs/transcription-architecture.md)。

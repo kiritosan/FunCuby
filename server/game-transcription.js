@@ -42,16 +42,18 @@ export function createGameTranscription({
     root,
     spawnImpl = spawn,
     python = process.env.FUNCUBY_GAME_PYTHON || "python",
+    enabled = process.env.FUNCUBY_GAME_ENABLED !== "0",
     jobTimeout = JOB_TIMEOUT,
+    maxConcurrent = 2,
 } = {}) {
-    let active = null,
-        retainedStem = null,
-        probe = null,
+    const active = new Set();
+    const retained = new Set();
+    let probe = null,
         probedAt = 0;
     const removeDirectory = (path) =>
         rm(path, { recursive: true, force: true }).catch(() => {});
     function expireStem(stem) {
-        if (retainedStem === stem) retainedStem = null;
+        retained.delete(stem);
         clearTimeout(stem.expiry);
         // A streaming response may still hold the file open on Windows.
         stem.expired = true;
@@ -169,14 +171,30 @@ export function createGameTranscription({
             if (url.pathname.endsWith("/status")) {
                 if (!["GET", "HEAD"].includes(req.method))
                     throw new RequestError(405, "method", "Expected GET");
-                json(res, 200, await readiness());
+                json(
+                    res,
+                    200,
+                    enabled
+                        ? await readiness()
+                        : {
+                              available: false,
+                              separationAvailable: false,
+                              disabled: true,
+                          },
+                );
                 return true;
             }
+            if (!enabled)
+                throw new RequestError(
+                    503,
+                    "unavailable",
+                    "GAME is disabled for this installation",
+                );
             if (url.pathname.endsWith("/vocals")) {
                 if (req.method !== "GET")
                     throw new RequestError(405, "method", "Expected GET");
                 const id = url.searchParams.get("id");
-                const stem = [active, retainedStem].find(
+                const stem = [...active, ...retained].find(
                     (candidate) =>
                         candidate?.ready &&
                         !candidate.delivered &&
@@ -204,7 +222,7 @@ export function createGameTranscription({
                         });
                         await pipeline(vocal.createReadStream(), res);
                         stem.delivered = true;
-                        if (retainedStem === stem) expireStem(stem);
+                        if (retained.has(stem)) expireStem(stem);
                     } finally {
                         await vocal.close();
                     }
@@ -255,14 +273,14 @@ export function createGameTranscription({
                     Number(length) % frameAlign)
             )
                 throw new RequestError(413, "too-large", "Invalid audio size");
-            if (active)
+            if (active.size >= maxConcurrent)
                 throw new RequestError(
                     409,
                     "busy",
                     "A GAME transcription is already running",
                 );
             token = {};
-            active = token;
+            active.add(token);
             req.once("aborted", disconnect);
             res.once("close", disconnect);
             directory = await mkdtemp(join(tmpdir(), "funcuby-game-"));
@@ -450,10 +468,9 @@ export function createGameTranscription({
             }
             // The child and upload are closed. Disk cleanup in this job's
             // private directory must not hold up a retry.
-            if (active === token) active = null;
+            active.delete(token);
             if (token?.ready && !token.delivered && !disconnected) {
-                if (retainedStem) expireStem(retainedStem);
-                retainedStem = token;
+                retained.add(token);
                 token.expiry = setTimeout(() => expireStem(token), STEM_TTL);
                 token.expiry.unref();
                 await rm(join(directory, "input.f32"), { force: true }).catch(

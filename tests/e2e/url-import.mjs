@@ -100,7 +100,14 @@ const fakeImport = {
     },
 };
 
-const server = createServer({ port: PORT, audioImport: fakeImport });
+const server = createServer({
+    libraryDirectory: resolve(
+        ".test-artifacts",
+        "library-url-import-" + crypto.randomUUID(),
+    ),
+    port: PORT,
+    audioImport: fakeImport,
+});
 await new Promise((resolve) => server.listen(PORT, "127.0.0.1", resolve));
 
 let browser, socket;
@@ -379,11 +386,11 @@ try {
     await wait(300);
     assert.equal(
         await evaluate(`document.getElementById('transcribe-run').disabled`),
-        true,
-        "stale decode enabled transcription",
+        false,
+        "previous successful import should remain playable",
     );
-    assert.equal(await clipHidden(), true);
-    assert.equal(await sourceName(), "");
+    assert.equal(await clipHidden(), false);
+    assert.match(await sourceName(), /fast-import/);
     assert.equal(await fetchStatus(), "");
     assert.equal(
         await evaluate(

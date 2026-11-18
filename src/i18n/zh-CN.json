@@ -1,7 +1,13 @@
 {
   "settings": {
-    "theme": { "label": "外观", "light": "浅色", "dark": "深色" },
-    "locale": { "label": "语言" }
+    "theme": {
+      "label": "外观",
+      "light": "浅色",
+      "dark": "深色"
+    },
+    "locale": {
+      "label": "语言"
+    }
   },
   "nav": {
     "label": "页面",
@@ -29,7 +35,10 @@
     "untitledTrack": "音轨 {number}",
     "sentenceGap": ""
   },
-  "format": { "timestamp": "含时间戳", "legacy": "无时间戳" },
+  "format": {
+    "timestamp": "含时间戳",
+    "legacy": "无时间戳"
+  },
   "fields": {
     "value": "数值",
     "channel": "通道",
@@ -256,7 +265,9 @@
     }
   },
   "send": {
-    "structured": { "title": "结构化消息" },
+    "structured": {
+      "title": "结构化消息"
+    },
     "command": {
       "label": "操作",
       "on": "按下音符",
@@ -277,7 +288,10 @@
       "hintAfter": "表示上一包写入完成后等待 101 ms 再执行下一行；支持小数，范围 0~60000 ms。空行忽略，发送前校验全部行。「取消待发任务」可中止等待及后续发送。",
       "submit": "逐行发送"
     },
-    "pending": { "label": "待发送任务", "empty": "暂无待发送任务" },
+    "pending": {
+      "label": "待发送任务",
+      "empty": "暂无待发送任务"
+    },
     "cancel": "取消待发任务",
     "written": "写入完成；这不是设备执行应答。",
     "rawDone": "本次逐行发送任务已结束，共 {count} 个包；浏览器写入结果不代表设备执行应答。",
@@ -326,7 +340,10 @@
       "minDuration": "{name} 最短音长（ms）",
       "minGap": "{name} 忽略抬起阈值（ms）"
     },
-    "mode": { "pressOnly": "只发按下", "paired": "按下和抬起" },
+    "mode": {
+      "pressOnly": "只发按下",
+      "paired": "按下和抬起"
+    },
     "hint": {
       "lengthen": "先将短音延长至最短音长，再合并重叠的同音抬起",
       "gap": "同通道、同音高的抬起到下次按下间隔小于阈值时，忽略该抬起",
@@ -518,13 +535,13 @@
       "saving": "正在保存到本机，请稍候再刷新…",
       "saved": "已保存到本机，刷新或下次打开可继续",
       "restored": "已恢复本机音频和已完成的转写，无需重新获取或识别",
-      "unavailable": "本机保存或恢复失败，可能是空间不足或浏览器限制。当前仍可使用，请下载 MIDI 备份；未能确认已保存。",
+      "unavailable": "读写磁盘曲库失败，请检查本地服务和磁盘空间。当前编辑可导出 MIDI 备份。",
       "conflict": "其他页面已替换或删除保存内容；本页不再自动覆盖。重新导入可保存本页歌曲。",
       "clearing": "正在删除本机保存…",
       "deleteFailed": "删除失败，本机内容可能仍然保留，请重试。",
       "clear": "删除保存并清空当前歌曲",
-      "confirmClear": "删除此浏览器保存的音频、转写结果和设置，并清空当前歌曲？已下载的 MIDI 不受影响。",
-      "hint": "自动保留最近一次成功导入的歌曲、各模式转写结果和设置，不自动播放或重新转写。请使用同一浏览器和同一地址（含端口）；无痕窗口、清理站点数据或浏览器回收空间可能删除保存。新歌曲会替换上一次保存。"
+      "confirmClear": "从磁盘曲库删除当前歌曲及其音频、人声、所有片段和乐谱？",
+      "hint": "每首歌有独立文件夹，包含原音频、分离人声、乐谱 MIDI 和可继续编辑的草稿。"
     },
     "clipStart": "片段起点（秒）",
     "clipLength": "片段长度（秒）",
@@ -567,7 +584,9 @@
     "previewFix": "请先修正上方设置以预览音符。",
     "emptyVersion": "该版本没有音符——试试其他级别。",
     "previewMore": "还有 {count} 个",
-    "notesCount": { "other": "{count} 音" },
+    "notesCount": {
+      "other": "{count} 音"
+    },
     "engine": "转写模式",
     "engineBasic": "浏览器扒谱 · 器乐",
     "engineGame": "GAME 直扒 · 清晰人声",
@@ -614,7 +633,7 @@
     "downloadOriginal": "下载工作旋律 MIDI",
     "editor": {
       "title": "旋律核对与修订",
-      "hint": "原曲、分离人声和钢琴草稿使用同一短句范围。可单独听，也可依次播放。勾选循环后会重复所选试听。时间相对当前转写片段，每句最长 30 秒。",
+      "hint": "上下句优先在停顿处分开。可手动调整起止时间（相对当前片段，最长 30 秒），循环对照原曲、人声和钢琴。弹到的音会亮起。",
       "from": "短句起点（秒）",
       "to": "短句终点（秒）",
       "loop": "循环短句",
@@ -627,6 +646,15 @@
       "stop": "停止短句",
       "previous": "上一短句",
       "next": "下一短句",
+      "nextBoundary": "跳到收音疑点",
+      "rest": "休止",
+      "earlyRelease": "疑似提前收音",
+      "samePitchRestart": "疑似同音重起",
+      "releaseDetail": "可能在 {at} 秒已收音。听听这里是否有停顿。",
+      "repeatDetail": "可能在 {at} 秒收音，{again} 秒再次唱出同一个音。",
+      "previewBefore": "听当前弹法",
+      "previewAfter": "听建议弹法",
+      "acceptBoundary": "采用此建议",
       "loading": "准备试听",
       "playing": "短句播放中",
       "stopped": "短句已停止",
@@ -654,13 +682,19 @@
       "invalidRange": "请选择片段内有效的起终点，短句长度为 0.1–30 秒。",
       "invalidEdit": "修改无效：音高须为 0–127 整数，起点与时长须在片段内。拆分两侧至少 20 毫秒；合并须为相邻同音且间隔不超过 250 毫秒。",
       "confirmReset": "恢复未经编辑的识别稿？本次操作可撤销，原音频不受影响。",
-      "confirmClip": "更改转写片段会清除当前各模式的转写和人工修订。确定继续？建议先导出核对草稿备份。",
-      "confirmRerun": "重新识别会替换当前模式的识别稿和人工修订。确定继续？建议先导出核对草稿备份。"
+      "confirmClip": "切换片段？当前转写和修订将保存在「已保存的片段版本」。",
+      "confirmRerun": "重新识别会替换当前模式的识别稿和人工修订。确定继续？建议先导出核对草稿备份。",
+      "lower": "低半音",
+      "higher": "高半音",
+      "shorter": "缩短 50 毫秒",
+      "longer": "延长 50 毫秒",
+      "precise": "精确数值与拆分合并",
+      "beat": "原曲叠加节拍",
+      "timestamps": "原曲 {source} 秒 · 片段 {clip} 秒"
     },
     "practice": "送去跟练",
     "assumptions": "钢琴试听使用本机 Salamander 真实采样（Alexander Holm，CC BY 3.0），并对播放力度作适度压缩，不修改音符 MIDI 力度。工作旋律使用当前人工修订；未经编辑的识别稿可单独下载。BPM 和 4/4 拍仍为草拟假设；改编试听并非与原曲同步的伴奏。",
     "notesTitle": "工作原理",
-    "notesBody": "音符由 Spotify Basic Pitch 在 Web Worker 中本地识别。多乐器混合时，系统取最高声部作为启发式旋律，并非可靠的人声分离；复杂混音可能需要更干净的音源或人工检查。入门版会省略半音（黑键）音符而非挪动它们；八度归位可能整体移动若干八度。转写结果仅供练习参考，不保证完全正确。",
     "url": {
       "label": "B 站或 YouTube 视频链接",
       "placeholder": "https://www.bilibili.com/video/BV… 或 https://www.youtube.com/watch?v=…",
@@ -736,6 +770,47 @@
       "firstNote": "设备映射到 MIDI 音高 {note}，25 键音域放不下。请调整设备偏移或音域。",
       "settings": "请检查改编设置（BPM 20–240、移调 −12…+12、原点在片段内、音高范围有效）。",
       "noAudio": "此浏览器不支持 Web Audio。"
+    },
+    "setup": "音源与转写设置",
+    "modeGuide": "各模式适用场景",
+    "savedClips": "已保存的片段版本",
+    "returnClip": "选择片段以恢复",
+    "library": "本机曲库",
+    "openSong": "打开已保存的歌曲",
+    "reviewOptions": "对照原曲与修订旋律",
+    "arrangeSettings": "调整节拍、移调与编配",
+    "compareWorking": "试听工作旋律（未简化）",
+    "reviewCues": "有 {count} 处收音疑点 · 跳到试听位置",
+    "version": "{song} · {name} · {count} 音 · {bpm} BPM",
+    "playVersion": "试听{name}",
+    "method": {
+      "basic-pitch": "Basic Pitch 在浏览器内识别音符，简化时会从候选声部中追踪主旋律。",
+      "game": "GAME 在本机直接识别歌声，适合主唱清晰的音频。当前 GAME 权重限非商业用途。",
+      "game-separated": "本机先用 UVR 分离人声，再用 GAME 识别旋律。可试听人声核对分离效果。当前 GAME 权重限非商业用途。"
+    },
+    "usePosition": "从原曲播放位置试选起点",
+    "diagnosticOptions": "排查转写问题",
+    "engineDisabled": "此安装使用浏览器模式，已停用 GAME 人声模型。",
+    "disk": {
+      "links": "从视频链接添加",
+      "linkHint": "每行一个 B 站或 YouTube 视频链接",
+      "importLinks": "获取音频并加入队列",
+      "batch": "批量扒谱",
+      "batchHint": "选好模式后可一次加入多首整曲。最多两首并行，其余等待。处理期间请保持页面打开。",
+      "add": "添加歌曲并解析",
+      "location": "磁盘保存位置",
+      "saving": "正在写入磁盘…",
+      "queued": "等待解析",
+      "running": "正在解析",
+      "done": "乐谱已保存",
+      "failed": "解析失败",
+      "cancelled": "已取消",
+      "open": "打开乐谱",
+      "cancel": "取消",
+      "retry": "重试",
+      "waitingSlot": "等待本机推理空位…",
+      "stemFailed": "人声文件未能写入或读取，请检查曲库目录与磁盘空间。",
+      "missing": "在磁盘曲库中找不到原音频。"
     }
   },
   "logs": {
@@ -767,7 +842,11 @@
       "message": "消息 / 状态",
       "hex": "原始 HEX"
     },
-    "source": { "import": "导入", "workbench": "工作台", "device": "现场" },
+    "source": {
+      "import": "导入",
+      "workbench": "工作台",
+      "device": "现场"
+    },
     "phase": {
       "queued": "排队",
       "writing": "写入中",
@@ -775,7 +854,9 @@
       "failed": "失败",
       "cancelled": "已取消"
     },
-    "event": { "state": "{state} tick={tick} · EP1 未验证" },
+    "event": {
+      "state": "{state} tick={tick} · EP1 未验证"
+    },
     "details": "详情",
     "detail": {
       "title": "报文详情",

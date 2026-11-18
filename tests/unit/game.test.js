@@ -118,7 +118,7 @@ test("GAME stream handles fragmented JSON and only settles after a valid EOF", a
     );
 });
 
-async function service(t, { hold = false, vocal = null } = {}) {
+async function service(t, { hold = false, vocal = null, enabled = true } = {}) {
     const children = [];
     const spawnImpl = (_command, args) => {
         const child = new EventEmitter();
@@ -170,7 +170,9 @@ async function service(t, { hold = false, vocal = null } = {}) {
         root: "C:/unused",
         port: 0,
         spawnImpl,
+        enabled,
         jobTimeout: 3000,
+        maxConcurrent: 1,
     });
     const server = http.createServer((req, res) => {
         void handler.handle(req, res).then((handled) => {
@@ -199,6 +201,16 @@ async function service(t, { hold = false, vocal = null } = {}) {
         });
     return { base, request, children };
 }
+
+test("an installation with GAME disabled never launches the model", async (t) => {
+    const { base, request, children } = await service(t, { enabled: false });
+    const info = await (
+        await fetch(base + "/api/transcription/game/status")
+    ).json();
+    assert.equal(info.disabled, true);
+    assert.equal((await request()).status, 503);
+    assert.equal(children.length, 0);
+});
 
 test("separated jobs deliver the vocal file through a one-use local URL", async (t) => {
     const vocal = Buffer.alloc(48, 37);

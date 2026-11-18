@@ -56,7 +56,7 @@ the same pipeline.
 
 ## Lifecycle rules
 
-- **One active job per tab.** A second `start` rejects `busy`. Two separate
+- **One active job per controller.** A second `start` rejects `busy`. Two separate
   epochs guard staleness: the UI owns a source/clip epoch (bumped by
   `invalidate()` on source change, clip edit, cancel or page leave) so stale
   async UI work cannot land, while the controller owns job/worker identity
@@ -85,7 +85,7 @@ the same pipeline.
   element, AudioContext and decoded PCM for both outcomes; with
   `persisted === true` the `TranscriptionJob` client stays reusable for
   `pageshow`/back-forward navigation, while a non-persisted `pagehide`
-  disposes it. A persisted `pageshow` restores the last committed IndexedDB
+  disposes it. A persisted `pageshow` restores the last committed disk library
   workbench without restarting inference; pagehide still releases decoded PCM.
   Switching tabs (visibility change, not `pagehide`) does
   **not** cancel a running transcription — it continues in the background

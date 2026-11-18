@@ -14,6 +14,13 @@ Stop/source change/pagehide abort loading and disconnect scheduled sources.
 
 ## Optional local GAME and vocal separation
 
+For a deployment that omits the noncommercial GAME weights, leave the GAME
+and UVR model assets out of the distribution and start the local server with
+`FUNCUBY_GAME_ENABLED=0` (PowerShell: `$env:FUNCUBY_GAME_ENABLED = "0"`).
+The server then skips the Python probe and disables both GAME inference paths.
+Basic Pitch remains available. Using GAME in a paid offering requires a
+separate licensing decision.
+
 The browser Basic Pitch path uses CPU and handles instrumental audio. New
 sessions select direct GAME when available and Basic Pitch otherwise. The page
 remembers the chosen mode. The GAME 1.0.3 small ONNX path targets singing.
@@ -56,9 +63,7 @@ MDX-Net Voc FT ONNX model for CPU vocal separation. See
    from a clear lead vocal. If the backing track masks the singer, select
    **UVR + GAME · Mixed vocals** to extract the vocal stem before transcription.
    For instrumental clips, select **Browser · Instruments** (Basic Pitch).
-3. Both GAME modes initially select working-melody piano playback at detected
-   note timings. Listen to the same phrase in the source and the draft before
-   comparing the simplified versions.
+3. Audition, MIDI export and practice share the selected difficulty. Open melody review for the unsimplified working draft or to check a phrase against source audio with beat clicks.
 4. Switching between completed modes restores their independent captures
    without re-inference.
 
@@ -67,8 +72,7 @@ completed inference windows. UVR + GAME tracks UVR and GAME separately. Each
 UVR window goes through spectrogram conversion, vocal extraction and waveform
 reconstruction before it is joined with the rest of the clip. You can play or
 download the 44.1 kHz stereo vocal WAV when separation finishes, including while
-GAME is still running. The browser holds the WAV for the current clip until
-the clip is changed or the page is reloaded. Download the WAV to keep it.
+GAME is still running. The local service saves the WAV with its clip range. Reopening that clip restores it for listening and phrase comparisons.
 
 After a new capture, the page estimates tempo and beat origin from the note
 onsets and recommends a semitone shift using the detected pitch classes and
@@ -81,28 +85,12 @@ editable. The simplified levels use the beat grid and pocket keyboard range.
 In dense polyphony, they trace a lead line before choosing beat anchors and
 folding octaves. The starter level uses the 15 main keys.
 
-Changing source or clip clears the corresponding in-memory captures. The most
-recent successfully imported source, completed mode captures, clip, arrangement
-and audition settings are now saved automatically in browser IndexedDB. Wait for
-the local-save confirmation before refreshing. Reopening the same browser and
-origin restores the work without source download, model inference or autoplay.
-This retains one workbench, not a multi-song library. A newly imported song
-replaces the previous save only after the new audio decodes successfully.
+New files and video links replace the active song after decoding succeeds.
+The Node server keeps a separate folder per song under `.funcuby-library/` (override with `FUNCUBY_LIBRARY_DIR`). The page shows the current folder. Each source is written once. `song.json` identifies the active snapshot containing `draft.json` and MIDI files grouped by clip and mode. UVR WAVs are saved as soon as they arrive. New edits publish a complete replacement snapshot. Revision checks reject stale edits from another tab.
 
-Audio bytes and their initial state commit atomically. Later edits write only
-state, not the audio Blob. Source identities prevent late/stale tabs from
-attaching notes to a different or deleted source. Storage failures are visible;
-the current page stays usable, but saving is not claimed. Last committed data
-survives a failed replacement. Deletion requires confirmation and clears the
-current page too; queued stale writes cannot resurrect it.
+The batch panel accepts multiple full audio files with one mode and language. It runs two tasks concurrently and tracks each song separately. Keep the tab open while processing. Imported audio and completed artifacts survive closing the browser or clearing site data. When first opened in a browser with previous FunCuby drafts, the app copies those local IndexedDB records to disk. Missing stems from older sessions require another separation pass.
 
-IndexedDB is local to an origin: `localhost` and `127.0.0.1`, different ports,
-browser profiles and private windows do not share it. Clearing site data or
-browser storage eviction can remove the save, so MIDI exports remain useful
-backups. This cannot retroactively recover data lost before persistence existed.
-
-Run `npm run test:e2e:storage` for real IndexedDB, refresh, browser/server restart,
-write-failure rollback, stale-tab, interrupted-restore and deletion checks.
+Run `npm run test:e2e:storage` for write failures, stale revisions, deletion and restart checks. To test two real separations and disk restoration, run `node tests/e2e/song-batch.mjs path/to/short-vocal.flac` after setting up the models.
 
 Direct GAME input is 44.1 kHz mono float32. The separation path uses 44.1 kHz
 stereo float32, runs UVR first, then downmixes the vocal stem for GAME. New URL
@@ -130,13 +118,27 @@ Short notes, octave-or-larger leaps and overlaps with the preceding onset-sorted
 note are prompts for listening, not probabilities or proof of errors. There is
 no automatic correction based on these flags.
 
+New GAME captures can also carry suggested rests. Direct GAME checks the input
+waveform and UVR + GAME checks the isolated vocals. Choose **Jump to a possible
+rest** in the phrase editor to focus playback around the gap. Compare the source
+or vocal stem, **Hear current notes**, and **Hear suggested notes**. **Apply this
+suggestion** shortens the selected note and, when the same pitch resumes, inserts
+a second note after the rest. Undo restores the previous draft. The suggestions
+survive refresh with the capture. Existing captures need a new run to acquire
+waveform-based suggestions.
+
+The check uses 30 ms frames, looking for a sustained drop in energy and
+periodicity. It checks the fundamental on both sides before proposing a repeat.
+Reverb, backing singers and very soft singing can obscure these cues. The
+editor leaves each decision to the listener.
+
 Each engine capture stores immutable `notes` plus optional `editedNotes`.
 Edits feed all arrangements, practice handoff and working-melody MIDI, but
 recognizer MIDI remains separately downloadable. Restore-recognizer and up to
 20 session-local undo snapshots support comparison. Edits survive refresh; undo
 history does not. Changing the transcription clip or rerunning an edited mode
 requires confirmation. Replacing the imported song retains the existing
-one-workbench replacement behavior.
+local song archive available from the source picker.
 
 Review JSON exports always say `referenceStatus: "unverified-draft"`, even after
 manual edits. They include original/working notes, phrase endpoints and the clip

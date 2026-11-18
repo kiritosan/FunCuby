@@ -19,7 +19,10 @@ import { t } from "../../i18n/i18n.js";
 import { byId, download, el, reportErrors } from "../dom.js";
 import { formatClock, formatDecimal } from "../format.js";
 import { createAudition } from "./audition.js";
-import { TranscriptionStore } from "../../core/storage/transcription-store.js";
+import { markSoundingNotes } from "./sounding-notes.js";
+import { DiskLibrary, vocalKey } from "../../core/storage/disk-library.js";
+import { prepareAudio } from "./prepare-audio.js";
+import { createSongBatch } from "./song-batch.js";
 import { workingNotes } from "../../core/transcription/melody-edit.js";
 import { analyzeMelody } from "../../core/transcription/musical-analysis.js";
 import { createMelodyEditor } from "./melody-editor.js";
@@ -41,7 +44,6 @@ const SAVED_FIELDS = [
     "transcribe-transpose",
     "transcribe-min-pitch",
     "transcribe-max-pitch",
-    "transcribe-audition-mode",
     "transcribe-audition-volume",
     "transcribe-url",
 ];
@@ -88,7 +90,8 @@ export function initTranscribePage({
     );
     const report = reportErrors((error) => notice(error, true));
     const captures = new Map();
-    const storage = new TranscriptionStore();
+    const clipVersions = new Map();
+    const storage = new DiskLibrary();
     let sourceId = null,
         storageRevision = 0,
         restoreAllowed = true,
@@ -100,12 +103,22 @@ export function initTranscribePage({
             if (!showPipeline || pageGone || !vocalRange) return;
             vocalUnavailable = blob === null;
             if (blob) {
-                vocalBlob = blob;
-                vocalUrl = URL.createObjectURL(blob);
-                vocalAudio.src = vocalUrl;
-                const link = byId("transcribe-vocals-download");
-                link.href = vocalUrl;
-                link.download = `${baseName()} · vocals.wav`;
+                presentVocal(blob);
+                const id = sourceId;
+                if (id)
+                    storage
+                        .saveStem(
+                            id,
+                            vocalKey(
+                                vocalRange.start,
+                                vocalRange.end - vocalRange.start,
+                            ),
+                            blob,
+                        )
+                        .catch(() => {
+                            if (id === sourceId)
+                                showError(t("transcribe.disk.stemFailed"));
+                        });
             }
             renderVocal();
         },
@@ -122,6 +135,7 @@ export function initTranscribePage({
     });
 
     const audioContext = () => (context ??= new AudioContext());
+    let scorePlayback = null;
     const audition = createAudition(audioContext, refreshAuditionButton);
     const currentCapture = () =>
         captures.get(
@@ -134,6 +148,10 @@ export function initTranscribePage({
         host: byId("transcribe-editor"),
         getContext: audioContext,
         piano: audition,
+        getBeat: () => ({
+            bpm: byId("transcribe-bpm").valueAsNumber,
+            originMs: byId("transcribe-origin").valueAsNumber,
+        }),
         getBuffer: () => decoded,
         getVocalStem: (capture) => {
             if (!vocalBlob) return null;
@@ -171,6 +189,25 @@ export function initTranscribePage({
     });
     const firstNote = () => 60 + getOffset();
 
+    const batch = createSongBatch({
+        storage,
+        audioContext,
+        getFields: () => savedState(null),
+        foregroundBusy: () => phase === "working",
+        firstNote,
+        onChange: refreshLibrary,
+        openSong,
+        describe: jobStatusText,
+        fetchSong: async (url, signal) => {
+            try {
+                return await fetchAudioFile(url, signal);
+            } catch (e) {
+                if (signal.aborted) throw e;
+                throw new Error(importErrorText(e), { cause: e });
+            }
+        },
+        errorText: transcriptionErrorText,
+    });
     function storageStatus(key) {
         if (pageGone) return;
         const node = byId("transcribe-storage-status");
@@ -185,10 +222,12 @@ export function initTranscribePage({
             version: 1,
             sourceId: id,
             level,
+            firstNote: firstNote(),
             settings: Object.fromEntries(
                 SAVED_FIELDS.map((key) => [key, byId(key).value]),
             ),
             captures: [...captures],
+            clipVersions: [...clipVersions],
         };
     }
 
@@ -223,15 +262,62 @@ export function initTranscribePage({
         commitSave(() => storage.saveState(id, state), id);
     }
 
+    let libraryRead = 0;
+    async function refreshLibrary() {
+        const revision = ++libraryRead;
+        const songs = await storage.listSongs().catch(() => []);
+        if (revision !== libraryRead || pageGone) return;
+        const picker = byId("transcribe-library");
+        picker.replaceChildren(new Option(t("transcribe.openSong"), ""));
+        for (const song of songs) {
+            const option = new Option(song.name, song.id);
+            option.disabled = batch.isActive(song.id);
+            picker.add(option);
+        }
+        picker.value = sourceId ?? "";
+        byId("transcribe-disk-path").textContent = sourceId
+            ? [storage.directory, sourceId].join(
+                  storage.directory.includes("\\") ? "\\" : "/",
+              )
+            : storage.directory;
+        picker.disabled = !songs.length || phase !== "idle" || importing;
+    }
+    async function openSong(id) {
+        if (!id || batch.isActive(id) || phase !== "idle" || importing) return;
+        invalidate();
+        const request = job;
+        const record = await storage.loadSong(id);
+        if (!record || request !== job) return;
+        await loadSource(
+            new File([record.source.blob], record.source.name, {
+                type: record.source.blob.type,
+            }),
+            { restored: record, activate: true },
+        );
+    }
+    byId("transcribe-library").addEventListener(
+        "change",
+        report((e) => openSong(e.target.value)),
+    );
     function saveSource(file) {
         const id = crypto.randomUUID();
         sourceId = id;
+        storage.select(id);
         const source = { version: 1, id, name: file.name, blob: file };
         const state = savedState(id);
-        commitSave(() => storage.replace(source, state), id);
+        commitSave(
+            () =>
+                storage.replace(source, state).then((ok) => {
+                    void refreshLibrary();
+                    return ok;
+                }),
+            id,
+        );
     }
 
     function applySavedDraft(record) {
+        for (const [key, version] of record.state.clipVersions ?? [])
+            clipVersions.set(key, version);
         for (const key of SAVED_FIELDS) {
             const value = record.state.settings[key];
             if (typeof value !== "string") continue;
@@ -277,6 +363,7 @@ export function initTranscribePage({
         byId("transcribe-audition-volume-value").value = `${volume}%`;
         userEditedArrangement = true;
         selectEngine(false);
+        byId("transcribe-setup").open = !capture;
         storageStatus("restored");
     }
 
@@ -284,6 +371,8 @@ export function initTranscribePage({
         const request = job;
         storageStatus("restoring");
         try {
+            await storage.migrateLegacy();
+            void refreshLibrary();
             const record = await storage.load();
             if (!restoreAllowed || pageGone || request !== job) return;
             if (!record) {
@@ -308,10 +397,25 @@ export function initTranscribePage({
     async function clearSavedDraft() {
         if (!window.confirm(t("transcribe.storage.confirmClear"))) return;
         restoreAllowed = false;
-        storageRevision++;
-        sourceId = null;
         if (importController) cancelImport(true);
         invalidate();
+        const request = job;
+        storageRevision++;
+        storageStatus("clearing");
+        try {
+            const cleared = await storage.clear(sourceId);
+            if (job !== request || pageGone) return;
+            if (!cleared) {
+                storageStatus("conflict");
+                return;
+            }
+        } catch {
+            storageStatus("deleteFailed");
+            return;
+        }
+        clipVersions.clear();
+        sourceId = null;
+        byId("transcribe-setup").open = true;
         resetResults();
         releaseSource();
         decoded = null;
@@ -321,13 +425,8 @@ export function initTranscribePage({
         byId("transcribe-url").value = "";
         byId("transcribe-clip").hidden = true;
         controls();
-        storageStatus("clearing");
-        try {
-            await storage.clear();
-            storageStatus("empty");
-        } catch {
-            storageStatus("deleteFailed");
-        }
+        storageStatus("empty");
+        void refreshLibrary();
     }
 
     function showError(text) {
@@ -422,6 +521,7 @@ export function initTranscribePage({
             );
             renderResults();
         }
+        if (decoded) void restoreVocal();
         controls();
         if (persist) saveState();
     }
@@ -432,6 +532,40 @@ export function initTranscribePage({
             byId("transcribe-source").pause();
         } catch {
             /* nothing playing */
+        }
+    }
+
+    function presentVocal(blob) {
+        vocalBlob = blob;
+        vocalUrl = URL.createObjectURL(blob);
+        vocalAudio.src = vocalUrl;
+        const link = byId("transcribe-vocals-download");
+        link.href = vocalUrl;
+        link.download = `${baseName()} · vocals.wav`;
+    }
+    async function restoreVocal() {
+        const capture = currentCapture();
+        if (enginePicker.value !== "game-separated" || !sourceId || vocalUrl)
+            return;
+        const id = sourceId,
+            request = job;
+        const start = capture?.clipStartMs ?? Number(startInput.value) * 1000;
+        const duration =
+            capture?.clipMs ??
+            Math.min(
+                Number(lengthInput.value),
+                decoded.duration - start / 1000,
+            ) * 1000;
+        try {
+            const blob = await storage.loadStem(id, vocalKey(start, duration));
+            if (!blob || id !== sourceId || request !== job || vocalUrl) return;
+            vocalRange = { start, end: start + duration };
+            presentVocal(blob);
+            renderVocal();
+            editor.render(currentCapture(), phase !== "idle");
+        } catch {
+            if (id === sourceId && request === job)
+                showError(t("transcribe.disk.stemFailed"));
         }
     }
 
@@ -483,6 +617,36 @@ export function initTranscribePage({
     }
 
     function controls() {
+        const historyPicker = byId("transcribe-clip-history");
+        const keys = [...clipVersions.keys()];
+        historyPicker.parentElement.hidden = !keys.length;
+        if (historyPicker.dataset.keys !== JSON.stringify(keys)) {
+            historyPicker.dataset.keys = JSON.stringify(keys);
+            historyPicker.replaceChildren(
+                new Option(t("transcribe.returnClip"), ""),
+            );
+            for (const key of keys) {
+                const [from, length] = key.split("/").map(Number);
+                historyPicker.add(
+                    new Option(
+                        formatClock(from * 1000) +
+                            " – " +
+                            formatClock(
+                                Math.min(
+                                    decoded?.duration ?? Infinity,
+                                    from + length,
+                                ) * 1000,
+                            ),
+                        key,
+                    ),
+                );
+            }
+        }
+        historyPicker.disabled = phase !== "idle" || importing;
+        byId("transcribe-method").textContent = t(
+            "transcribe.method." + enginePicker.value,
+        );
+        byId("transcribe-library").disabled = phase !== "idle" || importing;
         enginePicker.disabled = phase !== "idle" || importing;
         byId("transcribe-language").disabled =
             phase !== "idle" ||
@@ -503,10 +667,15 @@ export function initTranscribePage({
             !decoded ||
             (startInput.valueAsNumber === 0 &&
                 lengthInput.valueAsNumber >= decoded.duration);
+        byId("transcribe-extend").hidden = byId("transcribe-whole").hidden;
+        byId("transcribe-extend").disabled = runDisabled;
         byId("transcribe-cancel").hidden = phase !== "working";
         for (const id of ["transcribe-start", "transcribe-length"])
-            byId(id).disabled = !decoded || importing;
-        byId("transcribe-fetch").disabled = importing;
+            byId(id).disabled = !decoded || importing || phase === "decoding";
+        byId("transcribe-pick-file").disabled = phase === "working";
+        byId("transcribe-fetch").disabled = importing || phase === "working";
+        batch.syncModes(enginePicker);
+        batch.pump();
         byId("transcribe-fetch-cancel").hidden = !importing;
         updateActions();
         editor.render(currentCapture(), phase !== "idle" || importing);
@@ -514,37 +683,23 @@ export function initTranscribePage({
 
     // ---- source -------------------------------------------------------------------------------
 
-    async function loadSource(file, { restored = null } = {}) {
+    async function loadSource(
+        file,
+        { restored = null, activate = false } = {},
+    ) {
         if (!restored) restoreAllowed = false;
-        sourceId = null;
-        storageRevision++;
-        storageStatus("unsaved");
         invalidate();
         const request = job;
-        resetResults();
-        releaseSource();
         showError("");
-        decoded = null;
-        clipMs = 0;
-        byId("transcribe-clip").hidden = true;
-        controls();
         if (file.size > MAX_FILE_BYTES) {
             showError(t("transcribe.errors.tooLarge", { limit: 50 }));
-            return;
+            return false;
         }
-        sourceName = file.name;
-        byId("transcribe-source-name").textContent = file.name;
-        const audio = byId("transcribe-source");
-        sourceUrl = URL.createObjectURL(file);
-        audio.src = sourceUrl;
-        audio.hidden = false;
         phase = "decoding";
         byId("transcribe-status").textContent = t("transcribe.status.decoding");
         controls();
         const reject = (text) => {
             if (request !== job) return;
-            decoded = null;
-            byId("transcribe-clip").hidden = true;
             phase = "idle";
             byId("transcribe-status").textContent = "";
             showError(text);
@@ -564,6 +719,20 @@ export function initTranscribePage({
                 return reject(t("transcribe.errors.decode"));
             if (decodedBuffer.duration > MAX_AUDIO_SECONDS)
                 return reject(t("transcribe.errors.tooLong", { limit: 10 }));
+            resetResults();
+            clipVersions.clear();
+            releaseSource();
+            sourceId = null;
+            storageRevision++;
+            storageStatus("unsaved");
+            sourceName = file.name;
+            byId("transcribe-source-name").textContent = sourceName;
+            const audio = byId("transcribe-source");
+            sourceUrl = URL.createObjectURL(file);
+            audio.src = sourceUrl;
+            audio.hidden = false;
+            byId("transcribe-setup").open = true;
+            byId("transcribe-review").open = false;
             decoded = decodedBuffer;
             startInput.value = "0";
             startInput.max = String(decoded.duration);
@@ -576,8 +745,18 @@ export function initTranscribePage({
             phase = "idle";
             byId("transcribe-status").textContent = "";
             controls();
-            if (restored) applySavedDraft(restored);
-            else saveSource(file);
+            if (restored) {
+                applySavedDraft(restored);
+                storage.select(restored.source.id);
+                if (activate) {
+                    byId(
+                        currentCapture()
+                            ? "transcribe-results"
+                            : "transcribe-setup",
+                    ).scrollIntoView({ block: "start" });
+                }
+                void refreshLibrary();
+            } else saveSource(file);
             return true;
         } catch (error) {
             return reject(
@@ -628,15 +807,7 @@ export function initTranscribePage({
             importController = null;
         }
         importing = false;
-        if (hadImport) {
-            // Kill any in-flight source decode and drop the canceled link's
-            // preview so stale audio can never enable transcription.
-            invalidate();
-            decoded = null;
-            sourceName = "";
-            releaseSource();
-            byId("transcribe-clip").hidden = true;
-        }
+        if (hadImport) invalidate();
         byId("transcribe-fetch-status").textContent = quiet
             ? ""
             : t("transcribe.url.status.cancelled");
@@ -666,6 +837,47 @@ export function initTranscribePage({
         return name;
     }
 
+    async function fetchAudioFile(url, signal) {
+        if (url.length > MAX_URL_LENGTH) throw importError("tooLongUrl");
+        const status = await fetch("/api/audio-import/status", {
+            signal,
+        });
+        assertNotAborted(signal);
+        const statusType = status.headers.get("content-type") || "";
+        if (!status.ok || !statusType.includes("json"))
+            throw importError("server-missing");
+        const info = await status.json();
+        assertNotAborted(signal);
+        if (info && info.ready === false)
+            throw importError("unavailable", (info.missing || []).join(", "));
+        const response = await fetch("/api/audio-import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+            signal,
+        });
+        assertNotAborted(signal);
+        const contentType = response.headers.get("content-type") || "";
+        if (!response.ok) {
+            let data = null;
+            if (contentType.includes("json"))
+                data = await response.json().catch(() => null);
+            const code = data?.error?.code;
+            throw importError(
+                typeof code === "string" && code ? code : "server-missing",
+                data?.error?.message,
+            );
+        }
+        if (!/audio|wav|octet-stream/i.test(contentType))
+            throw importError("server-missing");
+        const blob = await response.blob();
+        assertNotAborted(signal);
+        if (!blob.size) throw importError("empty-result");
+        if (blob.size > MAX_FILE_BYTES) throw importError("too-large");
+        return new File([blob], importFileName(response), {
+            type: contentType.includes("flac") ? "audio/flac" : "audio/wav",
+        });
+    }
     async function fetchAudio() {
         if (importing) return;
         const input = byId("transcribe-url"),
@@ -681,18 +893,8 @@ export function initTranscribePage({
         }
         importSeq++;
         restoreAllowed = false;
-        sourceId = null;
-        storageRevision++;
-        storageStatus("unsaved");
         const seq = importSeq;
         invalidate();
-        resetResults();
-        // A link import replaces the source immediately — a failed or canceled
-        // fetch must not silently keep an unrelated older file playable.
-        decoded = null;
-        sourceName = "";
-        releaseSource();
-        byId("transcribe-clip").hidden = true;
         showError("");
         pauseSource();
         importing = true;
@@ -704,47 +906,8 @@ export function initTranscribePage({
         );
         controls();
         try {
-            const status = await fetch("/api/audio-import/status", {
-                signal: importController.signal,
-            });
+            const file = await fetchAudioFile(url, importController.signal);
             if (seq !== importSeq) return;
-            const statusType = status.headers.get("content-type") || "";
-            if (!status.ok || !statusType.includes("json"))
-                throw importError("server-missing");
-            const info = await status.json();
-            if (seq !== importSeq) return;
-            if (info && info.ready === false)
-                throw importError(
-                    "unavailable",
-                    (info.missing || []).join(", "),
-                );
-            const response = await fetch("/api/audio-import", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ url }),
-                signal: importController.signal,
-            });
-            if (seq !== importSeq) return;
-            const contentType = response.headers.get("content-type") || "";
-            if (!response.ok) {
-                let data = null;
-                if (contentType.includes("json"))
-                    data = await response.json().catch(() => null);
-                const code = data?.error?.code;
-                throw importError(
-                    typeof code === "string" && code ? code : "server-missing",
-                    data?.error?.message,
-                );
-            }
-            if (!/audio|wav|octet-stream/i.test(contentType))
-                throw importError("server-missing");
-            const blob = await response.blob();
-            if (seq !== importSeq) return;
-            if (!blob.size) throw importError("empty-result");
-            if (blob.size > MAX_FILE_BYTES) throw importError("too-large");
-            const file = new File([blob], importFileName(response), {
-                type: contentType.includes("flac") ? "audio/flac" : "audio/wav",
-            });
             await loadSource(file);
         } catch (error) {
             if (seq !== importSeq || error?.name === "AbortError") return;
@@ -877,11 +1040,6 @@ export function initTranscribePage({
         const actualSeconds = Math.min(length, decoded.duration - start);
         const engine = byId("transcribe-engine").value;
         const language = byId("transcribe-language").value;
-        const engineSpec =
-            TRANSCRIPTION_ENGINES[engine] ??
-            TRANSCRIPTION_ENGINES["basic-pitch"];
-        const sampleRate = engineSpec.sampleRate;
-        const channels = engineSpec.channels;
         if (
             currentCapture()?.editedNotes !== undefined &&
             !window.confirm(t("transcribe.editor.confirmRerun"))
@@ -906,41 +1064,31 @@ export function initTranscribePage({
         }
         showError("");
         pauseSource();
+        byId("transcribe-setup").open = true;
+        byId("transcribe-progress-detail").open = true;
         phase = "working";
         clipMs = 0;
         byId("transcribe-status").textContent = t("transcribe.status.clipping");
         controls();
         try {
+            while (batch.full) {
+                byId("transcribe-status").textContent = t(
+                    "transcribe.disk.waitingSlot",
+                );
+                await new Promise((resolve) => setTimeout(resolve, 200));
+                if (request !== job) return;
+            }
             const notes = await task.start(
                 async (signal) => {
-                    const offline = new OfflineAudioContext(
-                        channels,
-                        Math.ceil(actualSeconds * sampleRate),
-                        sampleRate,
+                    const prepared = await prepareAudio(
+                        audioBuffer,
+                        start,
+                        actualSeconds,
+                        engine,
+                        signal,
                     );
-                    const source = offline.createBufferSource();
-                    source.buffer = audioBuffer;
-                    source.connect(offline.destination);
-                    source.start(0, start, actualSeconds);
-                    const rendered = await offline.startRendering();
-                    assertNotAborted(signal);
-                    const frameCount = rendered.length;
-                    let samples;
-                    if (channels === 2) {
-                        const left = rendered.getChannelData(0);
-                        const right =
-                            rendered.numberOfChannels > 1
-                                ? rendered.getChannelData(1)
-                                : left;
-                        samples = new Float32Array(frameCount * 2);
-                        samples.set(left, 0);
-                        samples.set(right, frameCount);
-                    } else {
-                        samples = Float32Array.from(rendered.getChannelData(0));
-                    }
-                    clipMs = (frameCount / sampleRate) * 1000;
-                    if (samples.every((sample) => sample === 0))
-                        throw new TranscriptionError("silence");
+                    const { samples } = prepared;
+                    clipMs = prepared.clipMs;
                     const origin = byId("transcribe-origin");
                     origin.max = String(Math.round(clipMs));
                     if (Number(origin.value) > clipMs) origin.value = "0";
@@ -989,8 +1137,9 @@ export function initTranscribePage({
                 clipStartMs: start * 1000,
             });
             if (!userEditedArrangement) applyMusicalFit();
-            if (engine !== "basic-pitch")
-                byId("transcribe-audition-mode").value = "original";
+
+            byId("transcribe-setup").open = false;
+            byId("transcribe-progress-detail").open = false;
             phase = "idle";
             byId("transcribe-results").hidden = false;
             byId("transcribe-status").textContent = t(
@@ -1168,20 +1317,22 @@ export function initTranscribePage({
         });
     }
 
-    function renderPreview() {
+    function renderPreview(notes = selected?.notes ?? [], first = 0) {
         const box = byId("transcribe-preview");
         box.replaceChildren();
-        const notes = selected?.notes ?? [];
         if (!selected) return;
         if (!notes.length) {
             box.append(el("p", t("transcribe.emptyVersion"), "muted"));
             return;
         }
         const key = numberedKey(); // fixed 1=C; no key detection happens here
-        for (const note of notes.slice(0, PREVIEW_NOTES)) {
+        for (const [offset, note] of notes
+            .slice(first, first + PREVIEW_NOTES)
+            .entries()) {
             const pitch = numberedPitch(note.note, key),
                 token = el("span", "", "transcribe-note");
             token.title = `${noteName(note.note)} · ${formatDecimal(note.timeMs / 1000, 2)} s`;
+            token.dataset.index = String(first + offset);
             token.append(
                 el(
                     "span",
@@ -1197,12 +1348,12 @@ export function initTranscribePage({
             );
             box.append(token);
         }
-        if (notes.length > PREVIEW_NOTES)
+        if (notes.length > first + PREVIEW_NOTES)
             box.append(
                 el(
                     "span",
                     t("transcribe.previewMore", {
-                        count: notes.length - PREVIEW_NOTES,
+                        count: notes.length - first - PREVIEW_NOTES,
                     }),
                     "muted",
                 ),
@@ -1212,8 +1363,20 @@ export function initTranscribePage({
     function updateActions() {
         const notes = selected?.notes ?? [];
         const playable = notes.length > 0;
-        byId("transcribe-audition").disabled = !auditionNotes()?.length;
-        byId("transcribe-audition-mode").disabled = !melodyNotes?.length;
+        byId("transcribe-audition").disabled = !selected?.notes.length;
+        byId("transcribe-compare-working").disabled = !melodyNotes?.length;
+        const issues = melodyNotes?.filter((n) => n.boundary).length ?? 0;
+        const cue = byId("transcribe-review-cue");
+        cue.hidden = !issues;
+        cue.textContent = t("transcribe.reviewCues", { count: issues });
+        byId("transcribe-version").textContent = selected
+            ? t("transcribe.version", {
+                  song: sourceName,
+                  name: t("transcribe.level." + level + ".name"),
+                  count: notes.length,
+                  bpm: selected.bpm,
+              })
+            : "";
         byId("transcribe-download").disabled = !playable;
         byId("transcribe-download-original").disabled =
             !arrangements?.original?.notes.length;
@@ -1238,19 +1401,17 @@ export function initTranscribePage({
     }
 
     function refreshAuditionButton() {
+        const active = audition.active && scorePlayback;
+        const playing = audition.loading
+            ? "transcribe.auditionLoading"
+            : "transcribe.auditionStop";
         byId("transcribe-audition").textContent = t(
-            audition.loading
-                ? "transcribe.auditionLoading"
-                : audition.active
-                  ? "transcribe.auditionStop"
-                  : "transcribe.auditionPlay",
+            active === "version" ? playing : "transcribe.playVersion",
+            { name: t("transcribe.level." + level + ".name") },
         );
-    }
-
-    function auditionNotes() {
-        return byId("transcribe-audition-mode").value === "original"
-            ? melodyNotes
-            : selected?.notes;
+        byId("transcribe-compare-working").textContent = t(
+            active === "compare" ? playing : "transcribe.compareWorking",
+        );
     }
 
     // ---- wiring --------------------------------------------------------------------------------
@@ -1339,7 +1500,9 @@ export function initTranscribePage({
                 ? status?.separationAvailable
                     ? "transcribe.engineSeparatedReady"
                     : "transcribe.engineReady"
-                : "transcribe.engineMissing";
+                : status?.disabled
+                  ? "transcribe.engineDisabled"
+                  : "transcribe.engineMissing";
             byId("transcribe-engine-status").dataset.i18n = key;
             byId("transcribe-engine-status").textContent = t(key);
             if (!engineChosen) {
@@ -1356,12 +1519,40 @@ export function initTranscribePage({
             }
             controls();
         });
+    byId("transcribe-pick-file").addEventListener("click", () =>
+        byId("transcribe-file").click(),
+    );
+    byId("transcribe-use-position").addEventListener("click", () => {
+        if (decoded)
+            changeClip(
+                String(
+                    Math.max(
+                        0,
+                        Math.min(
+                            Math.floor(
+                                byId("transcribe-source").currentTime * 10,
+                            ) / 10,
+                            decoded.duration - 0.1,
+                        ),
+                    ),
+                ),
+                lengthInput.value,
+            );
+    });
     byId("transcribe-file").addEventListener(
         "change",
         report(async () => {
             if (importController) cancelImport(true);
-            const file = byId("transcribe-file").files[0];
-            if (file) await loadSource(file);
+            const input = byId("transcribe-file");
+            const files = Array.from(input.files);
+            input.value = "";
+            if (files.length > 1)
+                batch.add(
+                    files,
+                    enginePicker.value,
+                    byId("transcribe-language").value,
+                );
+            else if (files[0]) await loadSource(files[0]);
         }),
     );
     byId("transcribe-url").addEventListener("input", () => {
@@ -1401,6 +1592,9 @@ export function initTranscribePage({
             if (changeClip(startInput.value, String(length))) await run();
         }),
     );
+    byId("transcribe-extend").addEventListener("click", () =>
+        byId("transcribe-whole").click(),
+    );
     byId("transcribe-whole").addEventListener(
         "click",
         report(async () => {
@@ -1424,6 +1618,11 @@ export function initTranscribePage({
             );
         }),
     );
+    byId("transcribe-clip-history").addEventListener("change", (event) => {
+        const key = event.target.value;
+        event.target.value = "";
+        if (clipVersions.has(key)) changeClip(...key.split("/"));
+    });
     function requestedLength(duration) {
         return Math.min(
             MAX_AUDIO_SECONDS,
@@ -1440,10 +1639,34 @@ export function initTranscribePage({
                 [startInput.value, lengthInput.value] = appliedClip;
                 return false;
             }
+            if (captures.size)
+                clipVersions.set(appliedClip.join("/"), {
+                    captures: [...captures],
+                    firstNote: firstNote(),
+                    level,
+                    settings: Object.fromEntries(
+                        SAVED_FIELDS.map((id) => [id, byId(id).value]),
+                    ),
+                });
+            const key = [start, length].join("/");
+            const saved = clipVersions.get(key);
             appliedClip = [start, length];
             [startInput.value, lengthInput.value] = appliedClip;
             invalidate();
             resetResults();
+            if (saved) {
+                clipVersions.delete(key);
+                const fields = {
+                    ...saved.settings,
+                    "transcribe-start": start,
+                    "transcribe-length": length,
+                };
+                applySavedDraft({
+                    source: { id: sourceId },
+                    state: { ...saved, settings: fields },
+                });
+            }
+            controls();
             saveState();
         }
         return true;
@@ -1491,31 +1714,80 @@ export function initTranscribePage({
                 "transcribe-start",
                 "transcribe-length",
                 "transcribe-audition-volume",
-                "transcribe-audition-mode",
             ].includes(id),
     ))
         byId(id).addEventListener("input", saveState);
+    async function playScore(notes, target) {
+        if (audition.active && scorePlayback === target) {
+            editor.stop();
+            audition.stop();
+            return;
+        }
+
+        if (notes?.length) {
+            editor.stop();
+            pauseSource();
+            audition.stop();
+            scorePlayback = target;
+            let page = 0;
+            if (target === "version") renderPreview(notes);
+            await audition.play(notes, {
+                skipIntro: true,
+                onSounding(voices) {
+                    if (!voices) scorePlayback = null;
+                    if (target === "compare") {
+                        markSoundingNotes(
+                            byId("transcribe-compare-working"),
+                            byId("transcribe-compare-sounding"),
+                            voices,
+                        );
+                        return;
+                    }
+                    const label = byId("transcribe-sounding");
+                    if (!voices) renderPreview();
+                    if (voices?.length) {
+                        const first =
+                            Math.floor(
+                                voices.at(-1).displayIndex / PREVIEW_NOTES,
+                            ) * PREVIEW_NOTES;
+                        if (page !== first) {
+                            page = first;
+                            renderPreview(notes, page);
+                        }
+                    }
+                    markSoundingNotes(
+                        byId("transcribe-preview"),
+                        label,
+                        voices,
+                    );
+                },
+            });
+        }
+    }
     byId("transcribe-audition").addEventListener(
         "click",
-        report(async () => {
-            if (audition.active) {
-                editor.stop();
-                audition.stop();
-                return;
-            }
-            const notes = auditionNotes();
-            if (notes?.length) {
-                editor.stop();
-                pauseSource();
-                await audition.play(notes);
-            }
-        }),
+        report(() => playScore(selected?.notes, "version")),
     );
-    byId("transcribe-audition-mode").addEventListener("change", () => {
-        editor.stop();
-        audition.stop();
-        updateActions();
-        saveState();
+    byId("transcribe-compare-working").addEventListener(
+        "click",
+        report(() => playScore(melodyNotes, "compare")),
+    );
+    byId("transcribe-review-cue").addEventListener("click", () => {
+        byId("transcribe-review").open = true;
+        const next = byId("transcribe-editor").querySelector(
+            '[data-action="nextBoundary"]',
+        );
+        next.click();
+        next.focus();
+        byId("transcribe-editor")
+            .querySelector('[data-action="compare"]')
+            .click();
+    });
+    byId("transcribe-review").addEventListener("toggle", () => {
+        if (!byId("transcribe-review").open) {
+            editor.stop();
+            if (scorePlayback === "compare") audition.stop();
+        }
     });
     byId("transcribe-audition-volume").addEventListener("input", (event) => {
         editor.stop();
@@ -1584,6 +1856,7 @@ export function initTranscribePage({
         }),
     );
     window.addEventListener("pagehide", (event) => {
+        batch.cancelAll();
         pageGone = true;
         restoreAllowed = false;
         sourceId = null;
@@ -1623,6 +1896,7 @@ export function initTranscribePage({
     });
     controls();
     void restoreDraft();
+    void refreshLibrary();
     return {
         mappingChanged: () => {
             if (melodyNotes) renderResults();

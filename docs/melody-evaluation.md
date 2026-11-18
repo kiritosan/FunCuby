@@ -3,10 +3,12 @@
 ## Repeatable local benchmark
 
 The benchmark runs the three production transcription modes in a separate,
-headless browser. It uses four clips:
+headless browser. It uses six clips:
 
 - Tracks 20 and 28 from vocadito v3. Both trained-musician note annotations (A1
   and A2) are scored separately. Source frequency is rounded to MIDI semitones.
+- Mandarin tracks 35 and 36, reserved as additional song-level checks. Both
+  annotations are scored separately. These are solo recordings.
 - The same track 20 vocal mixed with fixed stereo piano backing 6 dB above the
   vocal RMS. Its two reference scores are identical to the solo case.
 - A piano phrase with repeated notes, an accidental and a rest. It is rendered
@@ -49,8 +51,18 @@ source hashes, individual reference scores, detected notes and elapsed times.
   simultaneous notes, largest main-key jump and shortest positive onset
   spacing. These describe keyboard demands. A playthrough is still needed
   to judge comfort and phrase identity.
+- **Vocal boundaries** scores the untouched recognizer notes and the result
+  of accepting all suggested releases and repeats. Compare offset error, missed
+  and extra notes, long notes and early releases. An early release ends more
+  than both 100 ms and 25% of the reference duration before the annotated end.
+- **Automatic starter** clicks Auto Fit in the production page. The report
+  records the resulting BPM, grid origin and transposition. To compare the
+  audible melody, it maps the reference and candidate arrangements back to
+  source time and pitch class, accounting for practice slowdown, transposition
+  and octave folding. It also records the actual demands on the 15 keys. Empty
+  detections have no playable arrangement.
 
-The four cases are an initial regression baseline. In particular, the mixed
+The original four cases are an initial regression baseline. In particular, the mixed
 case uses constructed accompaniment and the piano is rendered from a score.
 Use longer and more varied recordings for conclusions about general accuracy.
 
@@ -70,6 +82,29 @@ threshold after separation. On the rendered piano, Basic Pitch and direct GAME
 both found all 12 reference notes. Basic Pitch added nine extra notes, while
 direct GAME held two matched notes past the long-note threshold. UVR returned
 no transcription for that instrumental clip.
+
+### Vocal release review
+
+Six clips were processed in all three modes. The table gives the mean absolute
+offset error in milliseconds for matched notes, in A1 / A2 annotation order.
+The last column simulates accepting every suggested boundary in the draft.
+
+| Case and mode              |  Original | With suggestions |
+| -------------------------- | --------: | ---------------: |
+| Strong backing, UVR + GAME |  105 / 95 |          52 / 49 |
+| Mandarin 35, direct GAME   |   79 / 96 |          71 / 86 |
+| Mandarin 36, direct GAME   | 128 / 102 |          94 / 74 |
+
+Both annotators counted six abnormal long notes in the strong-backing case
+before review and two afterwards. Across the six clips, the final detector
+proposed only releases. Counts of missed notes, extras and early releases were
+unchanged. A synthetic repeated-pitch case exercises split suggestions, whose
+accuracy on recorded singing still needs independent validation.
+
+The 60–84 s excerpt of 《无中生有》 also passed production UVR transcription
+and playback. Five of its 65 notes had suggestions. For example, the note
+starting at source time 63.36 s had a suggested duration of 85 ms instead of
+230 ms. This excerpt has no independently reviewed score.
 
 ## Add a reference from a reviewed clip
 

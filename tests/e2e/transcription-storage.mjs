@@ -50,9 +50,14 @@ const fakeService = {
         return false;
     },
 };
+const libraryDirectory = resolve(
+    ".test-artifacts",
+    "library-storage-" + crypto.randomUUID(),
+);
 const startServer = () => {
     const instance = createServer({
         port: PORT,
+        libraryDirectory,
         audioImport: fakeService,
         gameTranscription: fakeService,
     });
@@ -120,7 +125,7 @@ const reload = async () => {
 };
 const readDraft = () =>
     browser.evaluate(`(async () => {
-    const { TranscriptionStore } = await import("/src/core/storage/transcription-store.js");
+    const { DiskLibrary: TranscriptionStore } = await import("/src/core/storage/disk-library.js");
     const draft = await new TranscriptionStore().load();
     if (!draft) return null;
     const hash = await crypto.subtle.digest("SHA-256", await draft.source.blob.arrayBuffer());
@@ -182,7 +187,7 @@ try {
     await browser.evaluate(`(() => {
         document.querySelector('.transcribe-level[data-level="melody"]').click();
         for (const [id, value] of Object.entries({"transcribe-bpm":"90", "transcribe-transpose":"2",
-            "transcribe-audition-volume":"42", "transcribe-audition-mode":"original"})) {
+            "transcribe-audition-volume":"42"})) {
             const n = document.getElementById(id); n.value = value;
             n.dispatchEvent(new Event("input", {bubbles:true}));
             n.dispatchEvent(new Event("change", {bubbles:true}));
@@ -289,11 +294,8 @@ try {
     console.log("PASS: browser and server restart retain the workbench");
 
     await browser.evaluate(`(() => {
-        window.__put = IDBObjectStore.prototype.put;
-        IDBObjectStore.prototype.put = function(...args) {
-            if (this.name === "workbench") throw new DOMException("quota", "QuotaExceededError");
-            return window.__put.apply(this, args);
-        };
+        const previous=window.fetch;
+        window.fetch=(url,options)=>String(url).startsWith("/api/library/") && options?.method==="PUT" ? Promise.reject(new Error("Disk full")) : previous(url,options);
         const n = document.getElementById("transcribe-bpm"); n.value = "91"; n.dispatchEvent(new Event("change"));
     })()`);
     await browser.until(
@@ -312,43 +314,20 @@ try {
     );
 
     const storageChecks = await browser.evaluate(`(async () => {
-        const {TranscriptionStore} = await import("/src/core/storage/transcription-store.js");
-        const a = new TranscriptionStore({name:"storage-concurrency-test"});
-        const b = new TranscriptionStore({name:"storage-concurrency-test"});
-        const source = (id) => ({version:1,id,name:id,blob:new Blob(["audio"])});
-        const state = (id) => ({version:1,sourceId:id,settings:{},captures:[]});
-        await a.replace(source("A"), state("A")); await b.replace(source("B"), state("B"));
-        const stale = await a.saveState("A", state("A"));
-        const name = (await b.load()).source.name;
-        const get = IDBObjectStore.prototype.get;
-        let interrupted = false, rejected = false;
-        IDBObjectStore.prototype.get = function(...args) {
-            const result = get.apply(this, args);
-            if (!interrupted && this.transaction.db.name === "storage-concurrency-test") {
-                interrupted = true;
-                const tx = this.transaction;
-                queueMicrotask(() => tx.abort());
-            }
-            return result;
-        };
-        try { await a.load(); }
-        catch { rejected = true; }
-        finally { IDBObjectStore.prototype.get = get; }
-        if (!rejected || (await b.load()).source.name !== "B")
-            throw new Error("Aborted read did not preserve committed work");
-        await b.clear(); const revive = await a.saveState("B", state("B"));
-        await Promise.all([a.replace(source("A"),state("A")),a.saveState("A",state("A")),a.clear()]);
-        return {stale,name,revive,empty:await a.load()};
+        const {DiskLibrary}=await import("/src/core/storage/disk-library.js");
+        const a=new DiskLibrary(), b=new DiskLibrary();
+        const id=crypto.randomUUID(),state={version:1,sourceId:id,captures:[],settings:{}};
+        await a.replace({id,version:1,name:"concurrency.wav",blob:new Blob(["audio"])},state);
+        await b.loadSong(id);
+        await a.saveState(id,state);
+        const stale=await b.saveState(id,state);
+        await a.clear(id);
+        const revive=await b.saveState(id,state);
+        sessionStorage.removeItem("funcuby:open-song");
+        return {stale,revive};
     })()`);
-    assert.deepEqual(storageChecks, {
-        stale: false,
-        name: "B",
-        revive: false,
-        empty: null,
-    });
-    console.log(
-        "PASS: stale tabs and queued writes cannot replace or resurrect deleted audio",
-    );
+    assert.deepEqual(storageChecks, { stale: false, revive: false });
+    console.log("PASS: revision checks prevent stale writes and resurrection");
 
     await browser.evaluate(`sessionStorage.setItem("holdDecode", "1")`);
     await browser.send("Page.reload");
@@ -398,13 +377,62 @@ try {
     console.log(
         "PASS: confirmed deletion survives reload; cancelled confirmation preserves data",
     );
+    const legacyIds = await browser.evaluate(`(async()=>{
+        const {TranscriptionStore}=await import("/src/core/storage/transcription-store.js");
+        const old=new TranscriptionStore();
+        const ids=[crypto.randomUUID(),crypto.randomUUID()];
+        for(const id of ids) await old.replace({version:1,id,name:id+".wav",blob:new Blob([new Uint8Array([1,2,3])])},
+            {version:1,sourceId:id,settings:{},captures:[]});
+        sessionStorage.setItem("funcuby:open-song","");
+        return ids;
+    })()`);
+    await browser.send("Page.reload");
+    await browser.until(
+        `document.querySelectorAll("#transcribe-library option").length>=4`,
+    );
+    const imported = await (await fetch(base + "/api/library")).json();
+    for (const id of legacyIds) {
+        assert.ok(imported.songs.some((song) => song.id === id));
+        assert.deepEqual(
+            new Uint8Array(
+                await (
+                    await fetch(base + "/api/library/" + id + "/source")
+                ).arrayBuffer(),
+            ),
+            new Uint8Array([1, 2, 3]),
+        );
+    }
+    console.log("PASS: legacy active and archived audio migrated to disk");
+    await browser.evaluate(`(()=>{
+        const input=document.getElementById("transcribe-batch-urls");
+        input.value=["https://www.bilibili.com/video/BVtest1","https://www.bilibili.com/video/BVtest2"].join(String.fromCharCode(10));
+        input.dispatchEvent(new Event("input"));
+        document.getElementById("transcribe-batch-import").click();
+    })()`);
+    await browser.until(
+        'document.querySelectorAll("#transcribe-batch-list li[data-state=done]").length===2',
+    );
+    const linkSongs = (
+        await (await fetch(base + "/api/library")).json()
+    ).songs.filter((song) => song.name === "saved-song.wav");
+    const links = await Promise.all(
+        linkSongs.map(
+            async (song) =>
+                (await (await fetch(base + "/api/library/" + song.id)).json())
+                    .state.settings["transcribe-url"],
+        ),
+    );
+    assert.ok(
+        links.includes("https://www.bilibili.com/video/BVtest1") &&
+            links.includes("https://www.bilibili.com/video/BVtest2"),
+    );
+    console.log(
+        "PASS: two video links retain independent source URLs and captures",
+    );
     await browser.send("Page.addScriptToEvaluateOnNewDocument", {
         source: `
-        const open = IDBFactory.prototype.open;
-        IDBFactory.prototype.open = function(name, ...args) {
-            if (name === "funcuby-transcription") throw new DOMException("denied", "SecurityError");
-            return open.call(this, name, ...args);
-        };
+        const previous=window.fetch;
+        window.fetch=(url,options)=>String(url).startsWith("/api/library") ? Promise.reject(new Error("Disk unavailable")) : previous(url,options);
     `,
     });
     await browser.send("Page.reload");

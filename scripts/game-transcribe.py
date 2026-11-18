@@ -349,7 +349,8 @@ def main():
             notes = model.transcribe(samples, progress)
         stage = "extracting"
         emit({"type": "status", "stage": "extracting", "backend": "cpu", "progress": 1})
-        emit({"type": "result", "notes": notes})
+        from vocal_boundaries import suggest_vocal_boundaries
+        emit({"type": "result", "notes": suggest_vocal_boundaries(notes, samples)})
         return 0
     except Exception as error:
         emit({

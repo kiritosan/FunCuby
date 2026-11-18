@@ -119,13 +119,13 @@ async function initialize() {
         navigate(location.hash.slice(1)),
     );
 
-    await logs.load();
+    navigate(location.hash.slice(1));
+    if (location.hash !== "#logs") await logs.load();
     book.record({
         source: "workbench",
         label: message("log.ready"),
         message: message("log.readyDetail"),
     });
-    navigate(location.hash.slice(1));
 }
 
 initialize().catch((error) =>

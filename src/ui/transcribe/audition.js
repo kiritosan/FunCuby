@@ -17,6 +17,8 @@ export function createAudition(
         bank = createPianoBank(),
         setTimer = (fn, ms) => setInterval(fn, ms),
         clearTimer = (timer) => clearInterval(timer),
+        requestFrame = (fn) => requestAnimationFrame(fn),
+        cancelFrame = (id) => cancelAnimationFrame(id),
     } = {},
 ) {
     let current = null,
@@ -28,6 +30,8 @@ export function createAudition(
         if (session) {
             session.abort.abort();
             clearTimer(session.timer);
+            if (session.frame !== undefined) cancelFrame(session.frame);
+            session.onSounding?.(null);
             for (const voice of session.voices) {
                 voice.source.onended = null;
                 try {
@@ -45,7 +49,10 @@ export function createAudition(
         onChange();
     }
 
-    async function play(input, { durationMs = null, loop = false } = {}) {
+    async function play(
+        input,
+        { durationMs = null, loop = false, skipIntro = false, onSounding } = {},
+    ) {
         stop();
         if (
             durationMs !== null &&
@@ -58,8 +65,12 @@ export function createAudition(
             throw new RangeError("Loop must be at least 100 ms");
         if (!input.length && durationMs === null) return;
         const notes = input
-            .map((note) => ({ ...note }))
+            .map((note, i) => ({
+                ...note,
+                displayIndex: note.displayIndex ?? i,
+            }))
             .sort((a, b) => a.timeMs - b.timeMs);
+        const offsetMs = skipIntro && durationMs === null ? notes[0].timeMs : 0;
         const session = {
             abort: new AbortController(),
             voices: new Set(),
@@ -67,6 +78,7 @@ export function createAudition(
             master: null,
             compressor: null,
             loading: true,
+            onSounding,
         };
         current = session;
         onChange();
@@ -132,7 +144,8 @@ export function createAudition(
                     (cursor < notes.length || loop) &&
                     startAt +
                         (cursor < notes.length
-                            ? cycle * (durationMs ?? 0) + notes[cursor].timeMs
+                            ? cycle * (durationMs ?? 0) +
+                              (notes[cursor].timeMs - offsetMs)
                             : (cycle + 1) * durationMs + notes[0].timeMs) /
                             1000 <
                         now + LOOKAHEAD_SECONDS
@@ -144,7 +157,8 @@ export function createAudition(
                     const note = notes[cursor++];
                     const requested =
                         startAt +
-                        (cycle * (durationMs ?? 0) + note.timeMs) / 1000;
+                        (cycle * (durationMs ?? 0) + (note.timeMs - offsetMs)) /
+                            1000;
                     const end =
                         requested + Math.max(0.03, note.durationMs / 1000);
                     if (end <= now) continue;
@@ -179,7 +193,7 @@ export function createAudition(
                     gain.gain.linearRampToValueAtTime(0, end + RELEASE_SECONDS);
                     source.connect(gain);
                     gain.connect(session.master);
-                    const voice = { source, gain };
+                    const voice = { source, gain, begin, end, note };
                     session.voices.add(voice);
                     source.onended = () => release(voice);
                     source.start(begin);
@@ -195,6 +209,25 @@ export function createAudition(
             // A bounded scheduling horizon avoids thousands of long-song nodes.
             session.timer = setTimer(pump, 50);
             pump();
+            if (onSounding && current === session) {
+                let previous = [];
+                const follow = () => {
+                    if (current !== session) return;
+                    const now = context.currentTime;
+                    const active = [...session.voices].filter(
+                        (v) => v.begin <= now && now < v.end,
+                    );
+                    if (
+                        active.length !== previous.length ||
+                        active.some((v, i) => v !== previous[i])
+                    ) {
+                        onSounding(active.map((v) => v.note));
+                        previous = active;
+                    }
+                    session.frame = requestFrame(follow);
+                };
+                follow();
+            }
             onChange();
             return { startAt };
         } catch (error) {

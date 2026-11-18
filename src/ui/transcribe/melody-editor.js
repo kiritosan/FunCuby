@@ -1,4 +1,5 @@
 import {
+    applyVocalBoundary,
     editMelody,
     reviewFlags,
     workingNotes,
@@ -7,6 +8,8 @@ import { noteName } from "../../core/music.js";
 import { t } from "../../i18n/i18n.js";
 import { download, el } from "../dom.js";
 import { createPhrasePlayer } from "./phrase-player.js";
+import { markSoundingNotes } from "./sounding-notes.js";
+import { phraseRanges } from "../../core/transcription/phrase-ranges.js";
 
 const PAGE_SIZE = 60;
 const MAX_HISTORY = 20;
@@ -18,6 +21,7 @@ export function createMelodyEditor({
     getBuffer,
     getVocalStem,
     getVolume,
+    getBeat,
     pauseSource,
     onChange,
     onError,
@@ -65,14 +69,28 @@ export function createMelodyEditor({
     loop.dataset.field = "loop";
     loopLabel.append(loop, el("span", text("loop")));
     const status = el("p", "", "muted transcribe-status-line");
+    const sounding = el("span", "", "melody-sounding");
+    let ranges = [],
+        rangeNotes = null;
+    let visibleRows = [],
+        rowOffset = 0;
     status.setAttribute("role", "status");
+    const transportState = el("span"),
+        clock = el("span");
+    clock.setAttribute("aria-hidden", "true");
+    status.append(transportState, clock);
     const player = createPhrasePlayer(getContext, piano, {
         onError,
         onUpdate: (state) => {
             host.dataset.playing = state.active ? state.mode : "";
-            status.textContent = state.active
-                ? `${text(state.loading ? "loading" : "playing")} · ${text(state.mode)} · ${((state.positionMs ?? 0) / 1000).toFixed(2)} s`
+            const label = state.active
+                ? `${text(state.loading ? "loading" : "playing")} · ${text(state.mode)}`
                 : text("stopped");
+            if (transportState.textContent !== label)
+                transportState.textContent = label;
+            clock.textContent = state.active
+                ? ` · ${((state.positionMs ?? 0) / 1000).toFixed(2)} s`
+                : "";
         },
     });
     function stop() {
@@ -93,18 +111,42 @@ export function createMelodyEditor({
             throw new Error(text("invalidRange"));
         return [a, b];
     }
-    async function play(mode) {
+    async function play(mode, notes = workingNotes(capture)) {
         const [fromMs, toMs] = bounds();
         pauseSource();
         await player.play({
             mode,
+            beat: mode === "beat" ? getBeat() : undefined,
             buffer: getBuffer(),
             vocalStem: getVocalStem(capture),
-            notes: workingNotes(capture),
+            notes,
             clipStartMs: capture.clipStartMs ?? 0,
             fromMs,
             toMs,
             loop: loop.checked,
+            onSounding: (voices) => {
+                const lastIndex = voices?.at(-1)?.displayIndex;
+                if (
+                    lastIndex !== undefined &&
+                    !list.querySelector(`[data-index="${lastIndex}"]`)
+                ) {
+                    const at = visibleRows.findIndex(
+                        (row) => row.index === lastIndex,
+                    );
+                    if (at >= 0)
+                        drawRows(Math.floor(at / PAGE_SIZE) * PAGE_SIZE);
+                } else if (!voices && rowOffset && capture) drawRows(0);
+                markSoundingNotes(list, sounding, voices);
+                const lit = list.querySelector("[data-sounding]");
+                if (lit) {
+                    const row = lit.getBoundingClientRect(),
+                        viewport = list.getBoundingClientRect();
+                    if (row.bottom > viewport.bottom)
+                        list.scrollTop += row.bottom - viewport.bottom;
+                    else if (row.top < viewport.top)
+                        list.scrollTop += row.top - viewport.top;
+                }
+            },
             volume: getVolume(),
         });
     }
@@ -124,35 +166,51 @@ export function createMelodyEditor({
         vocalButton,
         pianoButton,
         compareButton,
+        button("beat", () => play("beat")),
         button("stop", stop),
         loopLabel,
+        sounding,
     );
     const navigation = el("div", "", "play-controls");
     const summary = el("p", "", "muted transcribe-status-line");
+    function adjacent(direction) {
+        const fromMs = from.input.valueAsNumber * 1000,
+            toMs = to.input.valueAsNumber * 1000;
+        return direction > 0
+            ? ranges.find((r) => r.end > toMs + 0.01)
+            : ranges.findLast((r) => r.start < fromMs - 0.01);
+    }
     function move(direction) {
+        const target = adjacent(direction);
+        if (!target) return;
         stop();
-        const width = Math.min(
-            30000,
-            Math.max(
-                100,
-                to.input.valueAsNumber * 1000 - from.input.valueAsNumber * 1000,
-            ),
-        );
-        const begin = Math.max(
-            0,
-            Math.min(
-                capture.clipMs - width,
-                from.input.valueAsNumber * 1000 + direction * width,
-            ),
-        );
-        from.input.value = String(begin / 1000);
-        to.input.value = String(Math.min(capture.clipMs, begin + width) / 1000);
+        from.input.value = String(target.start / 1000);
+        to.input.value = String(target.end / 1000);
         renderList();
     }
-    navigation.append(
-        button("previous", () => move(-1)),
-        button("next", () => move(1)),
-    );
+    const previous = button("previous", () => move(-1)),
+        next = button("next", () => move(1));
+    navigation.append(previous, next);
+    const nextBoundary = button("nextBoundary", () => {
+        const notes = workingNotes(capture);
+        let index = notes.findIndex((n, i) => i > selection && n.boundary);
+        if (index < 0) index = notes.findIndex((n) => n.boundary);
+        if (index < 0) return;
+        stop();
+        selection = index;
+        const note = notes[index];
+        // Include both sides of the proposed rest even in a very long note.
+        const release = note.timeMs + note.boundary.releaseMs;
+        const resume =
+            note.timeMs + (note.boundary.repeatMs ?? note.boundary.releaseMs);
+        const begin = Math.max(0, release - 650);
+        from.input.value = String(begin / 1000);
+        to.input.value = String(
+            Math.min(capture.clipMs, begin + 30000, resume + 800) / 1000,
+        );
+        renderList();
+    });
+    navigation.append(nextBoundary);
     const list = el("div", "", "melody-editor-list");
     list.setAttribute("role", "group");
     list.setAttribute("aria-label", text("notes"));
@@ -163,6 +221,28 @@ export function createMelodyEditor({
     const split = number("splitAt", 0.125, 0, 600, 0.001);
     fields.append(pitch.label, start.label, duration.label, split.label);
     const actions = el("div", "", "play-controls");
+    const boundaryPanel = el("div", "", "play-controls");
+    const boundaryDetail = el("span", "", "muted");
+    boundaryPanel.append(
+        boundaryDetail,
+        button("previewBefore", () => play("piano")),
+        button("previewAfter", () =>
+            play(
+                "piano",
+                workingNotes(capture).flatMap((n, i) =>
+                    i === selection
+                        ? applyVocalBoundary(n).map((part) => ({
+                              ...part,
+                              displayIndex: i,
+                          }))
+                        : [{ ...n, displayIndex: i }],
+                ),
+            ),
+        ),
+        button("acceptBoundary", () =>
+            change({ type: "boundary", index: selection }),
+        ),
+    );
     const noteInput = () => ({
         note: pitch.input.valueAsNumber,
         timeMs: start.input.valueAsNumber * 1000,
@@ -177,7 +257,7 @@ export function createMelodyEditor({
         } catch {
             throw new Error(text("invalidEdit"));
         }
-        history.push(before);
+        history.push(capture.editedNotes ?? null);
         if (history.length > MAX_HISTORY) history.shift();
         stop();
         onChange(after);
@@ -248,6 +328,30 @@ export function createMelodyEditor({
         exportButton,
     );
     const editedStatus = el("p", "", "muted transcribe-status-line");
+    const quick = el("div", "", "play-controls"),
+        times = el("p", "", "muted");
+    const quickButtons = ["lower", "higher", "shorter", "longer"].map(
+        (key, i) =>
+            button(key, () => {
+                const n = workingNotes(capture)[selection];
+                const changeTo =
+                    i < 2
+                        ? { note: n.note + (i ? 1 : -1) }
+                        : {
+                              durationMs: Math.min(
+                                  capture.clipMs - n.timeMs,
+                                  Math.max(
+                                      20,
+                                      n.durationMs + (i === 2 ? -50 : 50),
+                                  ),
+                              ),
+                          };
+                change({ type: "update", index: selection, note: changeTo });
+            }),
+    );
+    quick.append(...quickButtons, undo);
+    const precise = el("details");
+    precise.append(el("summary", text("precise")), fields, actions);
     host.append(
         heading,
         hint,
@@ -258,13 +362,48 @@ export function createMelodyEditor({
         navigation,
         summary,
         list,
-        fields,
-        actions,
+        boundaryPanel,
+        times,
+        quick,
+        precise,
         editedStatus,
     );
     function select(index) {
         selection = index;
         const note = workingNotes(capture)[index];
+        times.textContent = note
+            ? t("transcribe.editor.timestamps", {
+                  source: (
+                      (note.timeMs + (capture.clipStartMs ?? 0)) /
+                      1000
+                  ).toFixed(2),
+                  clip: (note.timeMs / 1000).toFixed(2),
+              })
+            : "";
+        quickButtons.forEach(
+            (b, i) =>
+                (b.disabled =
+                    busy ||
+                    !note ||
+                    (i === 0 && note.note === 0) ||
+                    (i === 1 && note.note === 127) ||
+                    (i === 2 && note.durationMs <= 20) ||
+                    (i === 3 &&
+                        note.timeMs + note.durationMs >= capture.clipMs)),
+        );
+        boundaryPanel.hidden = !note?.boundary;
+        if (note?.boundary) {
+            const at = (offset) => ((note.timeMs + offset) / 1000).toFixed(2);
+            boundaryDetail.textContent = t(
+                note.boundary.repeatMs === undefined
+                    ? "transcribe.editor.releaseDetail"
+                    : "transcribe.editor.repeatDetail",
+                {
+                    at: at(note.boundary.releaseMs),
+                    again: at(note.boundary.repeatMs ?? 0),
+                },
+            );
+        }
         if (note) {
             pitch.input.value = String(note.note);
             start.input.value = String(Number((note.timeMs / 1000).toFixed(3)));
@@ -291,17 +430,32 @@ export function createMelodyEditor({
         const a = from.input.valueAsNumber * 1000,
             b = to.input.valueAsNumber * 1000;
         const notes = workingNotes(capture);
-        const visible = notes
+        nextBoundary.hidden = !notes.some((n) => n.boundary);
+        previous.disabled = busy || !adjacent(-1);
+        next.disabled = busy || !adjacent(1);
+        visibleRows = notes
             .map((note, index) => ({ note, index }))
             .filter(
                 ({ note }) =>
                     note.timeMs < b && note.timeMs + note.durationMs > a,
             );
+        if (!visibleRows.some((n) => n.index === selection))
+            selection = visibleRows[0]?.index ?? -1;
+        drawRows(0);
+        select(selection);
+    }
+    function drawRows(offset) {
+        list.replaceChildren();
+        rowOffset = offset;
+        const notes = workingNotes(capture);
         summary.textContent = t("transcribe.editor.count", {
-            visible: Math.min(visible.length, PAGE_SIZE),
-            total: visible.length,
+            visible: Math.min(visibleRows.length - offset, PAGE_SIZE),
+            total: visibleRows.length,
         });
-        for (const { note, index } of visible.slice(0, PAGE_SIZE)) {
+        for (const { note, index } of visibleRows.slice(
+            offset,
+            offset + PAGE_SIZE,
+        )) {
             const flags = reviewFlags(notes, index).map((key) => text(key));
             const node = el(
                 "button",
@@ -309,14 +463,12 @@ export function createMelodyEditor({
             );
             node.type = "button";
             node.dataset.index = String(index);
+            node.setAttribute("aria-pressed", String(index === selection));
             node.disabled = busy;
             node.addEventListener("click", () => select(index));
             list.append(node);
         }
-        if (!visible.length) list.append(el("p", text("empty"), "muted"));
-        if (!visible.some((n) => n.index === selection))
-            selection = visible[0]?.index ?? -1;
-        select(selection);
+        if (!visibleRows.length) list.append(el("p", text("empty"), "muted"));
     }
     for (const input of [from.input, to.input])
         input.addEventListener("change", () => {
@@ -336,12 +488,17 @@ export function createMelodyEditor({
                 stop();
                 return;
             }
+            if (rangeNotes !== workingNotes(capture)) {
+                rangeNotes = workingNotes(capture);
+                ranges = phraseRanges(rangeNotes, capture.clipMs);
+            }
             if (capture.notes !== original) {
+                rowOffset = 0;
                 original = capture.notes;
                 history = [];
                 selection = -1;
-                from.input.value = "0";
-                to.input.value = String(Math.min(10, capture.clipMs / 1000));
+                from.input.value = String(ranges[0].start / 1000);
+                to.input.value = String(ranges[0].end / 1000);
                 stop();
             }
             from.input.max = to.input.max = String(capture.clipMs / 1000);

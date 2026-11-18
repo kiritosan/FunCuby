@@ -98,7 +98,14 @@ const BROWSER =
     process.env.BROWSER ||
     "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
 const server = spawn(process.execPath, ["server.js"], {
-    env: { ...process.env, PORT: "18573" },
+    env: {
+        ...process.env,
+        PORT: "18573",
+        FUNCUBY_LIBRARY_DIR: resolve(
+            ".test-artifacts",
+            "library-smoke-" + crypto.randomUUID(),
+        ),
+    },
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
 });
@@ -573,7 +580,7 @@ try {
         await evaluate(
             `document.getElementById('transcribe-audition').textContent`,
         ),
-        "钢琴试听",
+        "试听入门主键骨干",
     );
     console.log("PASS: built-in audition plays and stops without Bluetooth");
     const pianoLevels = await evaluate(`(async () => {
@@ -598,9 +605,7 @@ try {
         JSON.stringify(pianoLevels),
     );
     await evaluate(`(() => {
-        const mode = document.getElementById("transcribe-audition-mode");
-        mode.value = "original";
-        mode.dispatchEvent(new Event("change"));
+        document.getElementById("transcribe-compare-working").click();
         const volume = document.getElementById("transcribe-audition-volume");
         volume.value = "50";
         volume.dispatchEvent(new Event("input"));
@@ -613,9 +618,7 @@ try {
     );
     assert.equal(await evaluate("window.__workerCount"), workerBaseline);
     await evaluate(`(() => {
-        const mode = document.getElementById("transcribe-audition-mode");
-        mode.value = "arranged";
-        mode.dispatchEvent(new Event("change"));
+        document.getElementById("transcribe-compare-working").click();
     })()`);
     // MIDI downloads roundtrip through the real parser.
     const downloadMidi = async (buttonId) => {
@@ -821,7 +824,9 @@ try {
     for (
         let i = 0;
         i < 600 &&
-        (await evaluate(`document.getElementById('transcribe-clip').hidden`));
+        (await evaluate(
+            `document.getElementById('transcribe-source-name').textContent !== 'clip219.wav'`,
+        ));
         i++
     )
         await wait(100);
@@ -992,7 +997,9 @@ try {
     for (
         let i = 0;
         i < 600 &&
-        (await evaluate(`document.getElementById('transcribe-clip').hidden`));
+        (await evaluate(
+            `document.getElementById('transcribe-source-name').textContent !== 'clip.wav'`,
+        ));
         i++
     )
         await wait(100);
@@ -1114,11 +1121,16 @@ try {
     const diagHidden = `document.getElementById('transcribe-diagnostic').hidden`;
     const fakeCount = `window.__fakeWorkers.length`;
     const NOTE = `{ note: 60, timeMs: 0, durationMs: 500, velocity: 100 }`;
+    const oldSourceUrl = await evaluate(
+        'document.getElementById("transcribe-source").src',
+    );
     await setFile("transcribe-file", wavPath);
     for (
         let i = 0;
         i < 600 &&
-        (await evaluate(`document.getElementById('transcribe-clip').hidden`));
+        (await evaluate(
+            `document.getElementById("transcribe-run").disabled || document.getElementById("transcribe-source").src===${JSON.stringify(oldSourceUrl)}`,
+        ));
         i++
     )
         await wait(100);
