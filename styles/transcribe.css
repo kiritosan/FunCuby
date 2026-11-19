@@ -52,6 +52,12 @@
 }
 
 /* Three rows per token: octave dots above, degree, octave dots below. */
+.transcribe-onset {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+}
+
 .transcribe-note {
     display: inline-flex;
     flex-direction: column;
@@ -455,11 +461,229 @@
         display: grid;
         align-items: stretch;
     }
-    .song-library .batch-controls {
-        display: grid;
-        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.transcribe-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 28%);
+    align-items: start;
+    gap: clamp(0.8rem, 2vw, 1.5rem);
+}
+#transcribe-work {
+    min-width: 0;
+    display: grid;
+    gap: 0.8rem;
+}
+#transcribe-results,
+#transcribe-work > .warning {
+    margin: 0;
+}
+.transcribe-switch {
+    display: none;
+}
+.song-library {
+    min-width: 0;
+}
+.song-library .library-heading {
+    display: grid;
+    gap: 0.75rem;
+}
+.song-library .library-heading select,
+.song-library .batch-controls select {
+    width: 100%;
+}
+.song-library .batch-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    gap: 0.65rem;
+}
+.song-library .batch-controls button {
+    grid-column: 1/-1;
+}
+.library-management {
+    margin-top: 1rem;
+}
+.library-management button {
+    color: var(--danger);
+}
+#transcribe-queue-summary {
+    font-size: 0.85rem;
+    margin: 0.85rem 0 0.25rem;
+}
+#transcribe-batch-list [data-state="failed"] span {
+    color: var(--danger);
+}
+#transcribe-storage-status {
+    font-size: 0.84rem;
+    overflow-wrap: anywhere;
+}
+#transcribe-storage-status[data-i18n="transcribe.storage.empty"] {
+    display: none;
+}
+.source-workflow > details:first-child > summary {
+    font-size: 1.1rem;
+    font-weight: 650;
+}
+.source-workflow .transcribe-file-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 1rem;
+    margin: 0.65rem 0;
+    border: 1px dashed var(--line);
+    border-radius: 0.65rem;
+    background: var(--surface-sunken);
+}
+.source-description {
+    display: grid;
+    min-width: 0;
+    gap: 0.3rem;
+}
+.source-description strong:empty {
+    display: none;
+}
+#transcribe-drop.dragging {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 12%, var(--surface));
+}
+.source-workflow .source-links,
+#transcribe-mode-options,
+#transcribe-range {
+    border-bottom: 1px solid var(--line);
+}
+#transcribe-mode-options > summary .muted,
+#transcribe-range > summary .muted {
+    margin-inline-start: 0.5rem;
+    font-size: 0.86rem;
+}
+.source-workflow .transcribe-engine-fields {
+    margin-top: 0.4rem;
+}
+.source-workflow .transcribe-form {
+    display: grid;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+#transcribe-range .transcribe-fields {
+    margin-block: 0.5rem;
+    max-width: 30rem;
+}
+#transcribe-range button {
+    margin-bottom: 0.65rem;
+}
+#transcribe-source {
+    width: 100%;
+    margin-block: 0.75rem 0.25rem;
+}
+.score-heading {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    align-items: start;
+    margin-bottom: 0.8rem;
+}
+.score-heading > div {
+    flex: 1 1 12rem;
+    min-width: 0;
+}
+.transcribe-level {
+    position: relative;
+}
+.transcribe-level[aria-pressed="true"] .transcribe-level-name {
+    padding-right: 0.8rem;
+}
+.transcribe-level[aria-pressed="true"]::after {
+    content: "";
+    position: absolute;
+    top: 0.55rem;
+    right: 0.55rem;
+    height: 0.55rem;
+    width: 0.28rem;
+    border: solid var(--accent);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+.score-heading h2 {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+.score-heading #transcribe-version {
+    margin: 0.2rem 0 0;
+    font-size: 0.875rem;
+}
+.score-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-block: 0.85rem;
+}
+.score-actions button {
+    white-space: normal;
+}
+.transcribe-level[aria-pressed="true"] {
+    background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+.score-sheet {
+    border-block: 1px solid var(--line);
+    padding-block: 0.5rem;
+}
+.score-sheet .play-hint {
+    margin: 0.45rem 0;
+}
+.score-sheet .melody-sounding {
+    display: block;
+    min-height: 1.25em;
+}
+
+@media (max-width: 959px) {
+    .transcribe-layout {
+        display: block;
     }
-    .batch-controls button {
+    .transcribe-switch {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.25rem;
+        padding: 0.25rem;
+        margin-bottom: 0.8rem;
+        border: 1px solid var(--line);
+        background: var(--surface-sunken);
+        border-radius: 0.65rem;
+    }
+    .transcribe-switch button {
+        background: transparent;
+        border-color: transparent;
+        min-height: 44px;
+    }
+    .transcribe-switch button[aria-pressed="true"] {
+        background: var(--surface);
+        border-color: var(--primary);
+        color: var(--text-strong);
+        font-weight: 650;
+    }
+    #panel-transcribe[data-view="work"] #transcribe-library-pane,
+    #panel-transcribe[data-view="library"] #transcribe-work {
+        display: none;
+    }
+}
+@media (max-width: 600px) {
+    #panel-transcribe .card {
+        padding: 1rem;
+    }
+    #panel-transcribe button,
+    #panel-transcribe summary {
+        min-height: 44px;
+    }
+    .score-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .score-actions .primary {
         grid-column: 1/-1;
+    }
+    .source-workflow .transcribe-file-row > button {
+        flex-grow: 1;
     }
 }

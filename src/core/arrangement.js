@@ -1,4 +1,11 @@
 import { MAX_OFFSET_MS } from "./transcription/config.js";
+import { estimateKeyAndTranspose } from "./transcription/musical-analysis.js";
+
+export const PLAYABLE_VERSIONS = Object.freeze([
+    "melody",
+    "fuller",
+    "original",
+]);
 
 // Pocket-keyboard arrangements with lead-voice tracking and phrase-aware octave placement.
 // Never mutate the input transcription.
@@ -7,25 +14,21 @@ export const ARRANGEMENT_LEVELS = Object.freeze({
         grid: 1,
         voices: 1,
         minBeats: 0.35,
-        maxBpm: 72,
     }),
     melody: Object.freeze({
-        grid: 0.5,
+        grid: 0,
         voices: 1,
-        minBeats: 0.22,
-        maxBpm: 96,
+        minBeats: 0,
     }),
     fuller: Object.freeze({
         grid: 0.25,
         voices: 2,
         minBeats: 0.125,
-        maxBpm: 112,
     }),
     original: Object.freeze({
         grid: 0,
         voices: Infinity,
         minBeats: 0,
-        maxBpm: 240,
     }),
 });
 
@@ -337,16 +340,81 @@ function foldIntoPocketRange(candidates, firstNote, transpose, globalShift) {
     return mapped;
 }
 
+// Choose a lower chord tone from the surrounding two beats. The estimated
+// scale is in the arranged key, after transposition and octave placement.
+function addLowerVoice(notes, firstNote, beatMs) {
+    const { majorRoot } = estimateKeyAndTranspose(notes);
+    const scale = [...WHITE_PC].map((pc) => (pc + majorRoot) % 12);
+    const chords = scale.map((root, i) => [
+        root,
+        scale[(i + 2) % 7],
+        scale[(i + 4) % 7],
+    ]);
+    const blockOf = (n) => Math.floor(n.timeMs / (2 * beatMs));
+    const weights = new Map();
+    for (const n of notes) {
+        const block = blockOf(n);
+        if (!weights.has(block)) weights.set(block, new Float64Array(12));
+        weights.get(block)[n.note % 12] += Math.min(n.durationMs, 2 * beatMs);
+    }
+    let previousPitch = firstNote + 5,
+        lastAttack = -Infinity;
+    const result = [];
+    for (const [i, n] of notes.entries()) {
+        result.push(n);
+        if (
+            notes[i - 1]?.timeMs === n.timeMs ||
+            notes[i + 1]?.timeMs === n.timeMs
+        ) {
+            lastAttack = n.timeMs;
+            continue;
+        }
+        if (n.durationMs < 0.4 * beatMs || n.timeMs - lastAttack < 1.7 * beatMs)
+            continue;
+        const weight = weights.get(blockOf(n));
+        let pitch = null,
+            best = -Infinity;
+        for (const chord of chords) {
+            if (!chord.includes(n.note % 12)) continue;
+            const fit = chord.reduce((sum, pc) => sum + weight[pc], 0) / beatMs;
+            for (const interval of [3, 4, 7, 8, 9]) {
+                const low = n.note - interval;
+                if (low < firstNote || !chord.includes(low % 12)) continue;
+                const score =
+                    fit -
+                    0.05 * Math.abs(low - previousPitch) +
+                    (low % 12 === chord[0] ? 0.08 : 0);
+                if (score > best) {
+                    best = score;
+                    pitch = low;
+                }
+            }
+        }
+        if (pitch !== null) {
+            result.push({
+                ...n,
+                note: pitch,
+                velocity: Math.max(1, Math.round(n.velocity * 0.62)),
+                generatedHarmony: true,
+            });
+            previousPitch = pitch;
+            lastAttack = n.timeMs;
+        }
+    }
+    return result;
+}
+
 export function arrangeTranscription(
     input,
     {
-        level = "starter",
+        level = "melody",
         bpm = 120,
         firstNote = 60,
         transpose = 0,
         originMs = 0,
         minPitch = 0,
         maxPitch = 127,
+        autoHarmony = false,
     } = {},
 ) {
     const preset = ARRANGEMENT_LEVELS[level];
@@ -362,6 +430,8 @@ export function arrangeTranscription(
         source: raw.length,
         filtered: 0,
         reduced: 0,
+        dyads: 0,
+        generatedHarmony: 0,
         omittedMainKeys: 0,
         octaveAdjusted: 0,
         octaveShift: 0,
@@ -370,6 +440,7 @@ export function arrangeTranscription(
     };
     const beatMs = 60000 / bpm;
     const gridMs = preset.grid * beatMs;
+    const minDuration = level === "melody" ? 55 : preset.minBeats * beatMs;
     let working = raw;
     if (level !== "original" && isDensePolyphonic(raw)) {
         const inBounds = raw.filter(
@@ -428,7 +499,8 @@ export function arrangeTranscription(
         }
     }
 
-    const groups = new Map();
+    const groups = [];
+    let lastBucket;
     let candidates = [];
     for (const source of working) {
         if (level === "original") {
@@ -439,26 +511,42 @@ export function arrangeTranscription(
             source.note < minPitch ||
             source.note > maxPitch ||
             source.timeMs < originMs ||
-            source.durationMs < preset.minBeats * beatMs
+            source.durationMs < minDuration
         ) {
             stats.filtered++;
             continue;
         }
         const shiftedMs = source.timeMs - originMs;
-        const timeMs = Math.round(shiftedMs / gridMs) * gridMs;
+        const bucket = gridMs
+            ? Math.round(shiftedMs / gridMs) * gridMs
+            : shiftedMs;
         const note = {
             ...source,
-            timeMs,
-            durationMs: Math.max(
-                gridMs,
-                Math.round(source.durationMs / gridMs) * gridMs,
-            ),
+            timeMs: level === "fuller" ? bucket : shiftedMs,
+            durationMs:
+                level === "fuller"
+                    ? Math.max(
+                          gridMs,
+                          Math.round(source.durationMs / gridMs) * gridMs,
+                      )
+                    : source.durationMs,
             rawDurationMs: source.durationMs,
-            gridErrorMs: Math.abs(shiftedMs - timeMs),
+            gridErrorMs: Math.abs(shiftedMs - bucket),
         };
-        const key = Math.round(timeMs / gridMs);
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(note);
+        let group = groups.at(-1);
+        if (!group || bucket !== lastBucket) {
+            group = { start: shiftedMs, notes: [] };
+            groups.push(group);
+        } else if (level === "fuller" && shiftedMs - group.start > 45) {
+            // Two separate attacks landed on one grid line. Keep their order
+            // and original spacing rather than turning them into a chord.
+            for (const previous of group.notes) previous.timeMs = group.start;
+            group = { start: shiftedMs, notes: [], useSourceStart: true };
+            groups.push(group);
+        }
+        if (group.useSourceStart) note.timeMs = group.start;
+        group.notes.push(note);
+        lastBucket = bucket;
     }
 
     if (level !== "original") {
@@ -478,7 +566,7 @@ export function arrangeTranscription(
                     (n.gridErrorMs / Math.max(1, gridMs)) * 0.65,
             };
         };
-        for (const group of groups.values()) {
+        for (const { notes: group } of groups) {
             group.sort((a, b) => {
                 const ra = rankCandidate(a),
                     rb = rankCandidate(b);
@@ -497,7 +585,7 @@ export function arrangeTranscription(
                 );
             if (
                 preset.voices === 1 &&
-                selected[0].timeMs < upperEnd &&
+                selected[0].timeMs + 45 < upperEnd &&
                 selected[0].note < upperPitch
             ) {
                 stats.reduced += group.length;
@@ -563,6 +651,7 @@ export function arrangeTranscription(
                 stats.reduced++;
                 continue;
             }
+            if (pitches.size === 1) stats.dyads++;
             pitches.add(note.note);
             active.push(note);
             deduped.push(note);
@@ -572,13 +661,13 @@ export function arrangeTranscription(
             (n) => n.octaveAdjusted,
         ).length;
     }
-    const outputBpm = Math.min(bpm, preset.maxBpm);
-    const scale = bpm / outputBpm;
-    const notes = candidates.map(({ octaveAdjusted: _adjusted, ...n }) => ({
-        ...n,
-        timeMs: n.timeMs * scale,
-        durationMs: n.durationMs * scale,
-    }));
+    if (level === "fuller" && autoHarmony) {
+        const duet = addLowerVoice(candidates, firstNote, beatMs);
+        stats.generatedHarmony = duet.length - candidates.length;
+        stats.dyads += stats.generatedHarmony;
+        candidates = duet;
+    }
+    const notes = candidates.map(({ octaveAdjusted: _adjusted, ...n }) => n);
     stats.outOfRange = notes.filter(
         (n) => n.note < firstNote || n.note > firstNote + 24,
     ).length;
@@ -588,7 +677,7 @@ export function arrangeTranscription(
         notes,
         stats,
         sourceBpm: bpm,
-        bpm: outputBpm,
+        bpm,
         durationMs: notes.reduce(
             (end, n) => Math.max(end, n.timeMs + n.durationMs),
             0,

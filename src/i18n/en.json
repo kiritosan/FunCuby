@@ -362,6 +362,44 @@
     }
   },
   "teach": {
+    "work": {
+      "settings": "Tracks, tempo and timing",
+      "demo": "Hear this phrase",
+      "stopDemo": "Stop preview",
+      "challenge": "20-second challenge",
+      "follow": "Start guided practice",
+      "rhythm": "Start rhythm challenge",
+      "backing": "Backing with reduced vocals (selections up to 30 s)",
+      "mix": "Play source mix (selections up to 30 s)",
+      "range": "Keyboard range",
+      "asWritten": "Written pitch",
+      "up": "Up an octave",
+      "down": "Down an octave",
+      "skip": "Playable notes only",
+      "rangeCount": "{out} of {total} selected notes are outside the keyboard range",
+      "unplayable": "Adjust the octave or tracks, or choose playable notes only.",
+      "playBar": "Bar {bar}",
+      "hearGroup": "Hear this group",
+      "slow": "Retry at 80% speed",
+      "reselect": "Choose another phrase",
+      "retryWeak": "Practice difficult bars",
+      "replay": "Play again",
+      "originalSpeed": "Retry at original tempo",
+      "weakBar": "Try again from bar {bar} · {count} waits, wrong keys or timing slips nearby.",
+      "progress": "{done}/{total} notes judged",
+      "onTime": "On time",
+      "early": "Early",
+      "late": "Late",
+      "partial": "Chord · {done}/{total}",
+      "chordDone": "Chord on time",
+      "chordEarly": "Chord early",
+      "chordLate": "Chord late",
+      "waitBeat": "Consistently early · wait a little",
+      "anticipate": "Consistently late · play a little earlier",
+      "phraseClear": "Clean phrase",
+      "record": "Local best {best} · {partial} partial chords, {whole} entirely missed",
+      "previous": "Previous best {score}, with {missed} missed chords"
+    },
     "summary": {
       "empty": "Upload a MIDI file and tick one or more tracks to start practising",
       "loaded": {
@@ -548,10 +586,26 @@
       "noHits": "No notes were hit this time.",
       "early": "Hits were {error} ms early on average (calibration applied).",
       "late": "Hits were {error} ms late on average (calibration applied).",
-      "stoppedMisses": "Ended early; unfinished notes count as misses."
+      "stoppedMisses": "Incomplete run. Only elapsed judgments are included."
     }
   },
   "transcribe": {
+    "workspace": {
+      "work": "Current song",
+      "library": "Library & batch",
+      "source": "Audio and transcription",
+      "editSource": "Source settings",
+      "changeFile": "Change file",
+      "drop": "Choose or drop a song",
+      "limits": "On-device processing · Up to 10 minutes and 50 MB",
+      "link": "Import a Bilibili or YouTube link",
+      "range": "Transcription range",
+      "runClip": "Transcribe selected range",
+      "startBatch": "Transcribe {count} selected songs",
+      "discard": "Clear file selection",
+      "queue": "{done} of {total} songs complete",
+      "failed": "{count} need attention"
+    },
     "title": "Audio to practice score",
     "intro": "Import an audio file or a Bilibili or YouTube link to create a pocket-piano score you can audition, export or practice. Transcription runs on this device.",
     "chooseAudio": "Choose audio file",
@@ -563,8 +617,8 @@
       "empty": "No locally saved song",
       "unsaved": "Current audio is not saved yet; the previous successful save is retained",
       "saving": "Saving locally; please wait before refreshing…",
-      "saved": "Saved locally; refresh or reopen to continue",
-      "restored": "Local audio and completed transcriptions restored without fetching or inference",
+      "saved": "Saved to disk",
+      "restored": "Restored from disk",
       "unavailable": "Could not read or write the library. Check the local server and free disk space. You can still export your edits as MIDI.",
       "conflict": "Another tab replaced or deleted the saved work. This tab will not overwrite it automatically; reimport to save this song.",
       "clearing": "Deleting local saved work…",
@@ -582,21 +636,17 @@
     "cancel": "Cancel",
     "levels": "Arrangement",
     "level": {
-      "starter": {
-        "name": "Starter · main keys",
-        "desc": "Quarter-note grid, one note at a time, slow tempo, small accidental keys omitted"
-      },
       "melody": {
-        "name": "Melody · single line",
-        "desc": "Eighth-note grid, one note at a time"
+        "name": "Melody · original rhythm",
+        "desc": "For listening or humming along. Play one note at a time with the melody’s phrasing and rests."
       },
       "fuller": {
-        "name": "Fuller · two voices",
-        "desc": "Sixteenth-note grid, up to two notes at a time"
+        "name": "Detailed arrangement",
+        "desc": "Practice two-note playing once you know the tune. Keep existing dyads or add a softer lower voice to individual notes."
       },
       "original": {
         "name": "Working melody (unadapted)",
-        "desc": "Current notes including edits, no grid or range adaptation"
+        "desc": "For checking the transcription and your edits. Keeps the working pitches and timing, including notes beyond the keyboard’s range."
       }
     },
     "origin": "Beat origin offset (ms)",
@@ -607,7 +657,7 @@
     "advanced": "Advanced: pitch filter",
     "minPitch": "Lowest MIDI note",
     "maxPitch": "Highest MIDI note",
-    "stats": "Heard {source} notes · kept {output} · filtered out {filtered} · thinned {reduced} · small keys omitted {omitted} · octave-folded {octave} (shift {shift}) · outside 25 keys {out} · tempo {bpm} BPM (assumed {assumption} BPM)",
+    "stats": "Source notes {source} · arranged notes {output} · filtered out {filtered} · thinned {reduced} · octave-folded {octave} (shift {shift}) · outside 25 keys {out} · tempo {bpm} BPM",
     "outOfRange": "{count} notes fall outside the 25-key range — download or audition only; practice is disabled.",
     "preview": "Note preview",
     "previewHint": "Fixed numbering 1=C — not a detected key. The full rhythmic score appears on the Practice page.",
@@ -659,6 +709,18 @@
     "auditionArranged": "Current arrangement",
     "auditionOriginal": "Working melody · original pitch and timing",
     "auditionVolume": "Piano volume",
+    "harmony": "Detailed harmony",
+    "harmonyOff": "Existing dyads only",
+    "harmonyAuto": "Auto-arrange harmony",
+    "generatedHarmony": "{count} auto-arranged",
+    "previewStart": "Preview from",
+    "previewPhrase": "First continuous phrase",
+    "previewFirst": "First note",
+    "previewSpeed": "Preview speed",
+    "dyadCount": {
+      "one": "{count} two-note attack",
+      "other": "{count} two-note attacks"
+    },
     "auditionStop": "Stop",
     "download": "Download MIDI",
     "downloadOriginal": "Download working melody MIDI",
@@ -673,6 +735,7 @@
       "piano": "Piano draft",
       "compare": "Play in sequence",
       "vocalHint": "Run UVR + GAME on this clip to add isolated vocals.",
+      "vocalMissing": "The score is saved, but this clip’s vocal WAV is missing. Run UVR + GAME on the same clip in transcription settings to save the vocals.",
       "vocalReadError": "This vocal stem could not be read. Re-run UVR + GAME for this clip.",
       "stop": "Stop phrase",
       "previous": "Previous phrase",
@@ -812,7 +875,7 @@
     "arrangeSettings": "Adjust tempo, key and arrangement",
     "compareWorking": "Compare the unsimplified melody",
     "reviewCues": "Review a possible release ({count} to check)",
-    "version": "{song} · {name} · {count} notes · {bpm} BPM",
+    "version": "{name} · {count} notes · {bpm} BPM",
     "playVersion": "Play {name}",
     "method": {
       "basic-pitch": "Basic Pitch detects notes in the browser. Simplification tracks a lead line through the candidates.",

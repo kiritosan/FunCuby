@@ -35,7 +35,7 @@ function followRoundText({ round, result, stopped }) {
     return `${label} · ${detail}`;
 }
 
-export function initTeachingScore(notice, peek) {
+export function initTeachingScore(notice, peek, keyboardRange, onRangeChange) {
     let model = null,
         start = 0,
         end = 0,
@@ -53,6 +53,10 @@ export function initTeachingScore(notice, peek) {
         best = 0,
         currentBlock = null;
     let emptyMessage = "teach.key.uploadFirst";
+    let lastSelection,
+        markedQuarters = new Set();
+    const outside = (note) =>
+        note < keyboardRange() || note > keyboardRange() + 24;
     let followTotals = { completed: 0, total: 0, waits: 0, wrong: 0 };
     const loopMode = () => byId("teach-loop-mode").value || "count";
     const isFollowMode = () => byId("teach-mode").value === "follow";
@@ -110,6 +114,24 @@ export function initTeachingScore(notice, peek) {
         byId("teach-loop-end").value = model.locate(
             Math.max(start, end - 1e-6),
         ).bar;
+        if (
+            !lastSelection ||
+            lastSelection.model !== model ||
+            lastSelection.start !== start ||
+            lastSelection.end !== end ||
+            lastSelection.first !== keyboardRange()
+        ) {
+            lastSelection = { model, start, end, first: keyboardRange() };
+            const selected = model.notes.filter(
+                (n) =>
+                    n.quarter >= start - QUARTER_EPSILON &&
+                    n.quarter < end - QUARTER_EPSILON,
+            );
+            onRangeChange(
+                selected.length,
+                selected.filter((n) => outside(n.note)).length,
+            );
+        }
     }
 
     function controls(value = locked) {
@@ -210,6 +232,10 @@ export function initTeachingScore(notice, peek) {
             !!model && model.lanes.length > 1,
         );
         if (!model) {
+            if (lastSelection) {
+                lastSelection = null;
+                onRangeChange(0, 0);
+            }
             byId("teach-score-key").textContent = t(emptyMessage);
             byId("teach-score-page").textContent = t("teach.score.empty");
             byId("teach-loop-range").textContent = t("teach.loop.rangeEmpty");
@@ -300,6 +326,12 @@ export function initTeachingScore(notice, peek) {
                                 key = lane.keyAt(quarter),
                                 pitch = numberedPitch(note.note, key),
                                 token = el("span", "", "score-note");
+                            token.classList.toggle(
+                                "outside-range",
+                                outside(note.note),
+                            );
+                            if (markedQuarters.has(note.quarter))
+                                cell.classList.add("review-beat");
                             token.title = t("teach.score.noteTitle", {
                                 track: name,
                                 note: noteName(note.note),
@@ -486,6 +518,14 @@ export function initTeachingScore(notice, peek) {
             song && selected.length
                 ? createTeachingScore(song, selected, bpm)
                 : null;
+        const shift = Number(byId("teach-range-policy").value) || 0;
+        if (model && shift) {
+            for (const list of [
+                model.notes,
+                ...model.lanes.map((l) => l.notes),
+            ])
+                for (const n of list) n.note += shift;
+        }
         emptyMessage = song
             ? "teach.key.chooseTracks"
             : "teach.key.uploadFirst";
@@ -508,10 +548,15 @@ export function initTeachingScore(notice, peek) {
         if (!model) throw new AppError("errors.uploadAndChoose");
         const range = {
             ...teachingRange(model, start, end),
+            startQuarter: start,
+            endQuarter: end,
+            countInMs: model.gapMs(start, 1),
             trackNames: model.lanes.map(
                 (lane) => `${lane.index + 1}. ${trackName(lane)}`,
             ),
         };
+        if (byId("teach-range-policy").value === "skip")
+            range.notes = range.notes.filter((n) => !outside(n.note));
         if (!isFollowMode()) return range;
         const count =
             loopMode() === "infinite"
@@ -620,6 +665,36 @@ export function initTeachingScore(notice, peek) {
     draw();
     return {
         refresh,
+        selection,
+        markMistakes(quarters) {
+            markedQuarters = new Set(quarters);
+            draw();
+        },
+        selectBars(a, b) {
+            if (!model || locked) return;
+            a = Math.max(1, Math.min(model.barCount, a));
+            start = model.barAt(a).start;
+            end = model.barAt(Math.max(a, Math.min(model.barCount, b))).end;
+            page = Math.floor((a - 1) / pageBars);
+            draw();
+        },
+        selectPhrase(startMs, spanMs) {
+            if (!model || locked) return;
+            start = Math.max(
+                0,
+                Math.min(model.endQuarter, model.grid.quarterAt(startMs)),
+            );
+            end = Math.min(
+                model.endQuarter,
+                model.grid.quarterAt(startMs + spanMs),
+            );
+            if (end <= start) {
+                start = 0;
+                end = model.endQuarter;
+            }
+            page = Math.floor((model.locate(start).bar - 1) / pageBars);
+            draw();
+        },
         plan,
         position,
         controls,

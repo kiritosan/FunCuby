@@ -41,6 +41,7 @@ export function teachingNotes(song, tracks, bpm) {
         const note = {
             id: notes.length,
             note: event.note,
+            velocity: event.velocity ?? 90,
             timeMs,
             tracks: [event.track],
         };

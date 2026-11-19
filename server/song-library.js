@@ -17,6 +17,7 @@ import {
 import { validateDraftState } from "../src/core/storage/transcription-store.js";
 import {
     arrangeTranscription,
+    PLAYABLE_VERSIONS,
     transcriptionMidi,
 } from "../src/core/arrangement.js";
 
@@ -94,14 +95,10 @@ async function publish(dir, meta, state) {
                         join(folder, "edited.mid"),
                         transcriptionMidi(working, options),
                     );
-                for (const level of [
-                    "starter",
-                    "melody",
-                    "fuller",
-                    "original",
-                ]) {
+                for (const level of PLAYABLE_VERSIONS) {
                     const arrangement = arrangeTranscription(working, {
                         level,
+                        autoHarmony: fields["transcribe-harmony"] === "auto",
                         bpm,
                         firstNote: version.firstNote ?? state.firstNote ?? 60,
                         transpose: Number(fields["transcribe-transpose"] || 0),

@@ -72,7 +72,7 @@ export function showResults({ result, follow, stopped, context }) {
     );
     byId("teach-score-formula").hidden = follow;
     byId("teach-result-timing").hidden = follow;
-    const rank = follow ? null : result.rank;
+    const rank = follow || stopped ? null : result.rank;
     const rankNode = byId("teach-final-rank");
     rankNode.hidden = !rank;
     rankNode.textContent = rank || "";
@@ -98,7 +98,7 @@ export function showResults({ result, follow, stopped, context }) {
     byId("teach-final-accuracy").textContent = t(
         "teach.results.rhythmSummary",
         {
-            accuracy: percent(result.accuracy),
+            accuracy: result.judged ? percent(result.accuracy) : "—",
             combo: result.maxCombo,
             od: result.od,
         },
@@ -115,6 +115,7 @@ export function showResults({ result, follow, stopped, context }) {
     byId("teach-result-timing").textContent = sentences(
         context,
         timingSummary(result.meanErrorMs),
+        t("teach.work.progress", { done: result.judged, total: result.total }),
         stopped && t("teach.results.stoppedMisses"),
     );
 }

@@ -316,7 +316,16 @@ export function teachingRange(score, start, end) {
                 note.quarter >= start - QUARTER_EPSILON &&
                 note.quarter < end - QUARTER_EPSILON,
         )
-        .map((note, id) => ({ ...note, id, timeMs: note.timeMs - startMs }));
+        .map((note, id) => ({
+            ...note,
+            id,
+            timeMs: note.timeMs - startMs,
+            durationMs: Math.min(
+                endMs - note.timeMs,
+                Math.max(60, score.grid.timeAt(note.endQuarter) - note.timeMs),
+            ),
+            bar: score.locate(note.quarter).bar,
+        }));
     if (!notes.length) throw new AppError("errors.emptyRange");
     return {
         notes,

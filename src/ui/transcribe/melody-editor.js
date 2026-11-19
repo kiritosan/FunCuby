@@ -10,6 +10,7 @@ import { download, el } from "../dom.js";
 import { createPhrasePlayer } from "./phrase-player.js";
 import { markSoundingNotes } from "./sounding-notes.js";
 import { phraseRanges } from "../../core/transcription/phrase-ranges.js";
+import { phrasePreviewIndex } from "./audition.js";
 
 const PAGE_SIZE = 60;
 const MAX_HISTORY = 20;
@@ -20,6 +21,7 @@ export function createMelodyEditor({
     piano,
     getBuffer,
     getVocalStem,
+    vocalHintKey,
     getVolume,
     getBeat,
     pauseSource,
@@ -497,8 +499,14 @@ export function createMelodyEditor({
                 original = capture.notes;
                 history = [];
                 selection = -1;
-                from.input.value = String(ranges[0].start / 1000);
-                to.input.value = String(ranges[0].end / 1000);
+                const firstOnset =
+                    rangeNotes[phrasePreviewIndex(rangeNotes)]?.timeMs;
+                const opening =
+                    ranges.find(
+                        (r) => r.start <= firstOnset && firstOnset < r.end,
+                    ) ?? ranges[0];
+                from.input.value = String(opening.start / 1000);
+                to.input.value = String(opening.end / 1000);
                 stop();
             }
             from.input.max = to.input.max = String(capture.clipMs / 1000);
@@ -508,6 +516,7 @@ export function createMelodyEditor({
             const hasVocal = Boolean(getVocalStem(capture));
             vocalButton.disabled = busy || !hasVocal;
             vocalHint.hidden = hasVocal;
+            if (!hasVocal) vocalHint.textContent = text(vocalHintKey());
             pianoButton.disabled = busy;
             compareButton.disabled = sourceButton.disabled;
             undo.disabled = busy || !history.length;

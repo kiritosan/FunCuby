@@ -124,6 +124,7 @@ try {
         BROWSER,
         [
             "--headless=new",
+            "--disable-extensions",
             "--disable-gpu",
             "--no-first-run",
             "--no-default-browser-check",
@@ -361,7 +362,7 @@ try {
         await evaluate(
             `document.querySelectorAll('#transcribe-levels .transcribe-level').length`,
         ),
-        4,
+        3,
     );
     assert.deepEqual(
         await evaluate(`[...document.querySelectorAll('.transcribe-engine-guide dd')]
@@ -519,6 +520,18 @@ try {
         "expected exactly one cancelled + one completed worker",
     );
     const workerBaseline = await evaluate(`window.__workerCount`);
+    assert.equal(
+        await evaluate(
+            `document.querySelector('.transcribe-level[aria-pressed="true"]').dataset.level`,
+        ),
+        "melody",
+    );
+    assert.equal(
+        await evaluate(
+            `document.getElementById("transcribe-preview-start").value`,
+        ),
+        "phrase",
+    );
     assert.ok(
         (await evaluate(
             `document.querySelectorAll('#transcribe-preview .transcribe-note').length`,
@@ -536,7 +549,14 @@ try {
     const previewBefore = await evaluate(
         `[...document.querySelectorAll('#transcribe-preview .transcribe-note')].map(n => n.title).join('|')`,
     );
-    for (const level of ["melody", "fuller", "original", "starter"])
+    await evaluate(`document.querySelector('.transcribe-level[data-level="fuller"]').click();
+        const harmony=document.getElementById('transcribe-harmony'); harmony.value="auto"; harmony.dispatchEvent(new Event('change'))`);
+    assert.ok(
+        await evaluate(
+            `document.querySelectorAll('.transcribe-onset .transcribe-note:nth-child(2)').length > 0`,
+        ),
+    );
+    for (const level of ["original", "melody"])
         await evaluate(
             `document.querySelector('.transcribe-level[data-level="${level}"]').click()`,
         );
@@ -550,13 +570,21 @@ try {
     const previewAfter = await evaluate(
         `[...document.querySelectorAll('#transcribe-preview .transcribe-note')].map(n => n.title).join('|')`,
     );
-    assert.notEqual(previewBefore, previewAfter);
+    // The melody keeps these six well-separated notes.
+    // Changing the beat grid must preserve their played onset times.
+    assert.equal(previewBefore, previewAfter);
+    assert.match(
+        await evaluate(
+            `document.getElementById('transcribe-stats').textContent`,
+        ),
+        /100/,
+    );
     console.log(
         "PASS: arrangement cards and BPM re-render from the capture without inference",
     );
     // Real local piano samples, no Bluetooth or network sample CDN.
     await evaluate(
-        `document.querySelector('.transcribe-level[data-level="starter"]').click()`,
+        `document.querySelector('.transcribe-level[data-level="melody"]').click()`,
     );
     await evaluate(`document.getElementById('transcribe-audition').click()`);
     for (let i = 0; i < 60; i++) {
@@ -580,7 +608,7 @@ try {
         await evaluate(
             `document.getElementById('transcribe-audition').textContent`,
         ),
-        "试听入门主键骨干",
+        "试听原节奏单音",
     );
     console.log("PASS: built-in audition plays and stops without Bluetooth");
     const pianoLevels = await evaluate(`(async () => {
@@ -638,11 +666,22 @@ try {
         await downloadMidi("transcribe-download"),
         "base64",
     );
+    await evaluate(`(() => {
+        for (const [id, value] of [["transcribe-preview-speed","0.5"],["transcribe-preview-start","first"]]) {
+            const control = document.getElementById(id);
+            control.value = value;
+            control.dispatchEvent(new Event("change"));
+        }
+    })()`);
+    assert.deepEqual(
+        Buffer.from(await downloadMidi("transcribe-download"), "base64"),
+        arrangedBytes,
+    );
     const originalBytes = Buffer.from(
         await downloadMidi("transcribe-download-original"),
         "base64",
     );
-    await writeFile(".test-artifacts/transcribe-starter.mid", arrangedBytes);
+    await writeFile(".test-artifacts/transcribe-melody.mid", arrangedBytes);
     await writeFile(".test-artifacts/transcribe-original.mid", originalBytes);
     const arrangedMidi = parseMidiFile(new Uint8Array(arrangedBytes));
     assert.ok(arrangedMidi.tracks[0].noteCount > 0);

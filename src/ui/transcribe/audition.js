@@ -5,6 +5,35 @@ const RELEASE_SECONDS = 0.12;
 const LOOKAHEAD_SECONDS = 0.5;
 const MAX_VOICES = 48;
 
+// Only bypass one or two opening attacks when a long rest leads into an
+// identifiable run of notes. Count chord tones as one attack and measure
+// silence from the end of the held notes.
+export function phrasePreviewIndex(sortedNotes) {
+    const attacks = [];
+    for (const [index, note] of sortedNotes.entries()) {
+        const last = attacks.at(-1);
+        const end = note.timeMs + note.durationMs;
+        if (last && note.timeMs - last.start <= 45) {
+            last.end = Math.max(last.end, end);
+        } else {
+            if (attacks.length === 5) break;
+            attacks.push({ index, start: note.timeMs, end });
+        }
+    }
+    let previousEnd = attacks[0]?.end;
+    for (let i = 1; i <= 2 && i + 2 < attacks.length; i++) {
+        const [first, second, third] = attacks.slice(i, i + 3);
+        if (
+            first.start - previousEnd >= 4000 &&
+            second.start - first.start <= 1500 &&
+            third.start - second.start <= 1500
+        )
+            return first.index;
+        previousEnd = Math.max(previousEnd, first.end);
+    }
+    return 0;
+}
+
 // Listening dynamics are separate from model activation and exported MIDI.
 export function pianoVelocity(velocity) {
     return 0.65 + 0.35 * Math.sqrt(Math.max(0, Math.min(127, velocity)) / 127);
@@ -51,9 +80,21 @@ export function createAudition(
 
     async function play(
         input,
-        { durationMs = null, loop = false, skipIntro = false, onSounding } = {},
+        {
+            durationMs = null,
+            loop = false,
+            skipIntro = false,
+            speed = 1,
+            onSounding,
+        } = {},
     ) {
         stop();
+        if (
+            !Number.isFinite(speed) ||
+            speed <= 0 ||
+            (durationMs !== null && speed !== 1)
+        )
+            throw new RangeError("Invalid score preview speed");
         if (
             durationMs !== null &&
             (!Number.isFinite(durationMs) || durationMs <= 0)
@@ -70,7 +111,13 @@ export function createAudition(
                 displayIndex: note.displayIndex ?? i,
             }))
             .sort((a, b) => a.timeMs - b.timeMs);
-        const offsetMs = skipIntro && durationMs === null ? notes[0].timeMs : 0;
+        const firstIndex =
+            skipIntro === "phrase" && durationMs === null
+                ? phrasePreviewIndex(notes)
+                : 0;
+        const offsetMs =
+            skipIntro && durationMs === null ? notes[firstIndex].timeMs : 0;
+        const noteDelay = (note) => (note.timeMs - offsetMs) / speed;
         const session = {
             abort: new AbortController(),
             voices: new Set(),
@@ -88,7 +135,7 @@ export function createAudition(
             if (current !== session) return;
             const samples = await bank.load(
                 context,
-                notes,
+                firstIndex ? notes.slice(firstIndex) : notes,
                 session.abort.signal,
             );
             if (current !== session) return;
@@ -104,7 +151,7 @@ export function createAudition(
             session.master.connect(session.compressor);
             session.compressor.connect(context.destination);
             const startAt = context.currentTime + 0.08;
-            let cursor = 0,
+            let cursor = firstIndex,
                 cycle = 0;
             const release = (voice) => {
                 voice.source.disconnect();
@@ -145,7 +192,7 @@ export function createAudition(
                     startAt +
                         (cursor < notes.length
                             ? cycle * (durationMs ?? 0) +
-                              (notes[cursor].timeMs - offsetMs)
+                              noteDelay(notes[cursor])
                             : (cycle + 1) * durationMs + notes[0].timeMs) /
                             1000 <
                         now + LOOKAHEAD_SECONDS
@@ -157,10 +204,10 @@ export function createAudition(
                     const note = notes[cursor++];
                     const requested =
                         startAt +
-                        (cycle * (durationMs ?? 0) + (note.timeMs - offsetMs)) /
-                            1000;
+                        (cycle * (durationMs ?? 0) + noteDelay(note)) / 1000;
                     const end =
-                        requested + Math.max(0.03, note.durationMs / 1000);
+                        requested +
+                        Math.max(0.03, note.durationMs / (1000 * speed));
                     if (end <= now) continue;
                     if (session.voices.size >= MAX_VOICES) {
                         const oldest = session.voices.values().next().value;
@@ -183,6 +230,7 @@ export function createAudition(
                     const strength =
                         0.38 *
                         pianoVelocity(note.velocity) *
+                        (note.generatedHarmony ? 0.7 : 1) *
                         sample.normalization;
                     gain.gain.setValueAtTime(0, begin);
                     gain.gain.linearRampToValueAtTime(strength, begin + 0.004);

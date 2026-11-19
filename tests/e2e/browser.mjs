@@ -11,6 +11,7 @@ export async function openTestBrowser(profile) {
             "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
         [
             "--headless=new",
+            "--disable-extensions",
             "--disable-gpu",
             "--no-first-run",
             "--no-default-browser-check",

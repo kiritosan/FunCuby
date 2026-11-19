@@ -218,6 +218,7 @@ export function estimateKeyAndTranspose(notes, firstNote = 60) {
     if (!(totalWeight > 0)) {
         return {
             tonic: "C",
+            majorRoot: 0,
             majorName: "C",
             minorName: "A",
             mode: "major",
@@ -280,6 +281,7 @@ export function estimateKeyAndTranspose(notes, firstNote = 60) {
         tonic: isMinor
             ? RELATIVE_MINOR_NAMES[majorRoot]
             : MAJOR_NAMES[majorRoot],
+        majorRoot,
         majorName: MAJOR_NAMES[majorRoot],
         minorName: RELATIVE_MINOR_NAMES[majorRoot],
         mode: isMinor ? "minor" : "major",

@@ -118,6 +118,55 @@ try {
         });
         await browser.send("DOM.setFileInputFiles", { nodeId, files: [file] });
     };
+    const screenshot = async (name) => {
+        await browser.send("Page.bringToFront");
+        await browser.evaluate("window.scrollTo(0,0)");
+        const shot = await browser.send("Page.captureScreenshot", {
+            format: "png",
+        });
+        await writeFile(
+            resolve(".test-artifacts/" + name + ".png"),
+            Buffer.from(shot.data, "base64"),
+        );
+    };
+    await browser.send("Emulation.setDeviceMetricsOverride", {
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+    assert.ok(
+        await browser.evaluate(`(() => {
+        const pick=document.getElementById("transcribe-pick-file").getBoundingClientRect();
+        return pick.height>0 && pick.bottom<=innerHeight &&
+            document.getElementById("transcribe-show-work")?.getAttribute("aria-pressed")==="true" &&
+            !document.querySelector(".song-library").getClientRects().length;
+    })()`),
+        "Mobile opens on the single-song import",
+    );
+    await screenshot("transcribe-import-mobile");
+    await browser.evaluate(`(() => {
+        const data = new DataTransfer();
+        for(const name of ["one.wav","two.wav"]) data.items.add(new File(["sample"],name));
+        document.getElementById("transcribe-drop").dispatchEvent(new DragEvent("drop",{dataTransfer:data,bubbles:true,cancelable:true}));
+    })()`);
+    assert.ok(
+        await browser.evaluate(
+            'document.getElementById("transcribe-library-title").getBoundingClientRect().height>0',
+        ),
+    );
+    assert.equal(
+        await browser.evaluate(
+            'document.getElementById("transcribe-batch-add").textContent.includes("2") && !document.querySelector("#transcribe-batch-list li")',
+        ),
+        true,
+    );
+    await browser.evaluate(
+        'document.getElementById("transcribe-batch-discard").click()',
+    );
+    await browser.evaluate(
+        'document.getElementById("transcribe-show-work").click()',
+    );
     await setFile(path);
     await browser.until(`!document.getElementById("transcribe-run").disabled`);
     await browser.evaluate(`(() => {
@@ -134,6 +183,19 @@ try {
         `document.querySelectorAll("#transcribe-editor .melody-editor-list button").length === 3`,
     );
     await saved();
+    await screenshot("transcribe-score-mobile");
+    await browser.send("Emulation.setDeviceMetricsOverride", {
+        width: 1280,
+        height: 880,
+        deviceScaleFactor: 1,
+        mobile: false,
+    });
+    assert.ok(
+        await browser.evaluate(
+            'document.querySelector(".song-library").getBoundingClientRect().left >= document.getElementById("transcribe-work").getBoundingClientRect().right',
+        ),
+    );
+    await screenshot("transcribe-workspace-desktop");
     const capture = () =>
         browser.evaluate(`(async () => {
         const {DiskLibrary:TranscriptionStore}=await import("/src/core/storage/disk-library.js");

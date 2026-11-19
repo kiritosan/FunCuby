@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
     createAudition,
     pianoVelocity,
+    phrasePreviewIndex,
 } from "../../src/ui/transcribe/audition.js";
 import {
     createPianoBank,
@@ -133,6 +134,48 @@ test("score preview skips a silent intro while keeping later rests and source ti
     assert.deepEqual(r.sources[1].starts, [startAt + 1]);
     assert.equal(notes[0].timeMs, 15000);
     r.player.stop();
+});
+
+test("phrase preview bypasses an isolated opening and slows playback with original indices", async () => {
+    const r = rig(),
+        updates = [];
+    const notes = [8000, 23070, 23220, 23500, 42000].map((t) => note(t));
+    const { startAt } = await r.player.play(notes, {
+        skipIntro: "phrase",
+        speed: 0.5,
+        onSounding: (voices) =>
+            updates.push(voices?.map((v) => v.displayIndex)),
+    });
+    assert.deepEqual(
+        r.sources.map((s) => s.starts[0]),
+        [startAt, startAt + 0.3],
+    );
+    r.context.currentTime = startAt + 0.01;
+    for (const tick of [...r.frames]) tick();
+    assert.deepEqual(updates.at(-1), [1]);
+    assert.deepEqual(
+        notes.map((n) => n.timeMs),
+        [8000, 23070, 23220, 23500, 42000],
+    );
+    r.player.stop();
+});
+
+test("phrase preview keeps sustained openings, sparse pieces and later rests", () => {
+    const starts = (times) => times.map((t) => note(t));
+    assert.equal(phrasePreviewIndex(starts([0, 10000, 10000, 10010])), 0);
+    assert.equal(phrasePreviewIndex(starts([0, 10000, 14000])), 0);
+    assert.equal(
+        phrasePreviewIndex([
+            { ...note(0), durationMs: 9000 },
+            ...starts([10000, 10300, 10600]),
+        ]),
+        0,
+    );
+    assert.equal(
+        phrasePreviewIndex(starts([0, 300, 600, 12000, 12300, 12600])),
+        0,
+    );
+    assert.equal(phrasePreviewIndex(starts([0, 300, 11000, 11300, 11600])), 2);
 });
 
 test("piano highlights follow sounding voices across chords, rest and loop, independent of lookahead", async () => {

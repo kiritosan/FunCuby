@@ -94,7 +94,7 @@ async function initialize() {
         preferences,
         notice,
         getOffset: device.getOffset,
-        loadPracticeFile: (file) => teach.loadPracticeFile(file),
+        loadPracticeFile: (file, media) => teach.loadPracticeFile(file, media),
     });
 
     function navigate(tab) {

@@ -154,13 +154,15 @@ try {
         engine.value = "basic-pitch";
         engine.dispatchEvent(new Event("change", { bubbles: true }));
     })()`);
+    const initialDocument = await browser.evaluate("performance.timeOrigin");
     await browser.send("Page.reload", { ignoreCache: true });
     await browser.until(
-        `document.getElementById("transcribe-storage-status")?.dataset.i18n === "transcribe.storage.empty" &&
+        `performance.timeOrigin !== ${initialDocument} && document.getElementById("transcribe-storage-status")?.dataset.i18n === "transcribe.storage.empty" &&
          !document.getElementById("transcribe-engine-game").disabled`,
     );
     assert.equal(await browser.evaluate(engineValue), "basic-pitch");
     await browser.evaluate(`(() => {
+        document.querySelector(".source-links").open = true;
         document.getElementById("transcribe-url").value = "https://www.bilibili.com/video/BVtest";
         document.getElementById("transcribe-fetch").click();
     })()`);

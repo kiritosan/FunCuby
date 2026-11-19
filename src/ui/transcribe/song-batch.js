@@ -22,6 +22,7 @@ export function createSongBatch({
     fetchSong,
 }) {
     const items = [];
+    let canOpen = true;
     let running = 0,
         imports = Promise.resolve();
     const mode = byId("transcribe-batch-mode");
@@ -30,6 +31,7 @@ export function createSongBatch({
     const input = byId("transcribe-batch-files");
     const msg = (key) => t("transcribe.disk." + key);
     function display(item, status, detail) {
+        const changed = item.status !== status;
         item.status = status;
         item.row.dataset.state = status;
         item.statusText.textContent = detail ?? msg(status);
@@ -42,7 +44,28 @@ export function createSongBatch({
             cancelled: "retry",
         }[status];
         item.button.hidden = !action;
+        item.button.disabled = status === "done" && !canOpen;
         item.button.textContent = action ? msg(action) : "";
+        if (action)
+            item.button.setAttribute(
+                "aria-label",
+                msg(action) +
+                    " · " +
+                    item.row.querySelector("strong").textContent,
+            );
+        if (changed) {
+            const summary = byId("transcribe-queue-summary");
+            const done = items.filter((i) => i.status === "done").length;
+            const failed = items.filter((i) => i.status === "failed").length;
+            const label =
+                t("transcribe.workspace.queue", { done, total: items.length }) +
+                (failed
+                    ? " · " +
+                      t("transcribe.workspace.failed", { count: failed })
+                    : "");
+            summary.hidden = false;
+            if (summary.textContent !== label) summary.textContent = label;
+        }
     }
     async function decode(file) {
         const audio = await audioContext().decodeAudioData(
@@ -206,7 +229,7 @@ export function createSongBatch({
                 version: 1,
                 sourceId: id,
                 captures: [],
-                level: "starter",
+                level: "melody",
                 settings,
                 firstNote: firstNote(),
             };
@@ -297,7 +320,25 @@ export function createSongBatch({
             };
         }
     }
-    byId("transcribe-batch-add").onclick = () => input.click();
+    const addButton = byId("transcribe-batch-add");
+    const discard = byId("transcribe-batch-discard");
+    let stagedFiles = [];
+    function stage(files) {
+        stagedFiles = files;
+        discard.hidden = !files.length;
+        addButton.textContent = files.length
+            ? t("transcribe.workspace.startBatch", { count: files.length })
+            : msg("add");
+    }
+    discard.onclick = () => {
+        stage([]);
+        addButton.focus();
+    };
+    addButton.onclick = () => {
+        if (!stagedFiles.length) return input.click();
+        add(stagedFiles, mode.value, language.value);
+        stage([]);
+    };
     input.onchange = () => {
         add(Array.from(input.files), mode.value, language.value);
         input.value = "";
@@ -322,11 +363,18 @@ export function createSongBatch({
     };
     let modes = "";
     return {
+        setCanOpen(value) {
+            if (canOpen === value) return;
+            canOpen = value;
+            for (const item of items)
+                if (item.status === "done") item.button.disabled = !canOpen;
+        },
         pump,
         get full() {
             return running >= 2;
         },
         add,
+        stage,
         isActive: (id) =>
             items.some(
                 (i) =>

@@ -33,13 +33,13 @@ For Bluetooth connections, use a browser that supports Web Bluetooth, such as Ch
 
 **Transcribe** turns a local audio file into a practice score. Import MP3, WAV or another browser-decodable format (up to 50 MB and 10 minutes), then use the whole source or trim a 1–600 s clip. Use Basic Pitch for instruments, direct GAME for clear lead vocals, or UVR + GAME when the backing track masks the singer. The page remembers your mode. On first use it selects direct GAME when available and Basic Pitch otherwise. The two GAME modes require Python and model setup. See [local model setup](docs/melody-quality.md#optional-local-game-and-vocal-separation).
 
-After transcription, **Auto Tempo + Main-Key Fit** estimates BPM and beat origin and suggests a transpose for the keyboard's main keys. **Original Key** sets transpose to zero. You can edit these settings, audition four arrangement levels, download MIDI, or open a score in Practice. Inference runs entirely on your device and can be cancelled.
+After transcription, **Auto Tempo + Main-Key Fit** estimates BPM and beat origin and suggests a transpose for the keyboard's main keys. **Original Key** sets transpose to zero. You can edit these settings, audition the single-line melody, the detailed arrangement with optional auto-harmony, or the working melody, download MIDI, or open a score in Practice. Inference runs entirely on your device and can be cancelled.
 
 The progress panel shows preparation, model loading, completed processing windows and note extraction. UVR + GAME shows separation and transcription independently. When UVR finishes, you can play or download the isolated stereo WAV while GAME continues. Reopening the clip restores its saved vocal preview.
 
 You can also paste a public Bilibili or YouTube video link and click **Fetch audio**. The local server downloads and normalizes the audio with yt-dlp + ffmpeg, then hands it to the same file pipeline — transcription still only runs when you click Start. This needs internet access, the local `npm start` server, and yt-dlp plus ffmpeg/ffprobe (see [docs/url-import.md](docs/url-import.md) for setup). It uses no cookies, no login, and no DRM or access-control bypass — only fetch content you are allowed to download.
 
-The local Node server saves each song in `.funcuby-library/` in the project. Set `FUNCUBY_LIBRARY_DIR` to choose another directory before starting the server. Each song contains the original audio, available vocal WAVs, editable notes and MIDI files for each difficulty. Batch transcription processes up to two full songs concurrently. Keep the tab open until the queue finishes. Piano score previews start at the first note. Short phrase comparisons and exported MIDI keep their timing.
+The local Node server saves each song in `.funcuby-library/` in the project. Set `FUNCUBY_LIBRARY_DIR` to choose another directory before starting the server. Each song contains the original audio, available vocal WAVs, editable notes and MIDI files for each difficulty. Batch transcription processes up to two full songs concurrently. Keep the tab open until the queue finishes. New songs open on the single-line melody with its original rhythm. Piano previews start at the first continuous phrase when the opening contains isolated notes. Choose **First note** to hear those notes, or lower the preview speed to listen more closely. Phrase comparisons, practice and MIDI use the score timeline.
 
 Use **Try 25 seconds** to transcribe a short sample from the current start, then
 **Transcribe whole track** when ready. In melody review you can play the same
@@ -87,9 +87,9 @@ npm start
 
 **扒谱**把本机音频文件转成练习谱。支持 MP3、WAV 等浏览器可解码的格式，最大 50 MB、10 分钟。可以使用整首音频，也可以裁剪 1–600 秒片段。钢琴、吉他等器乐可用浏览器 Basic Pitch，清晰人声优先用 GAME 直扒，伴奏盖住主唱时可用 UVR 分离人声后再转写。页面会记住选用的模式。首次使用时，GAME 就绪便选直扒，否则使用浏览器模式。两个 GAME 模式都需要安装 Python 依赖和模型。见[本机模型安装说明](docs/melody-quality.md#optional-local-game-and-vocal-separation)。
 
-转写完成后，可用「自动节拍 + 全大键适配」估算 BPM、节拍原点和适合大键的移调量。「还原原调」将移调设回 0。你也可以手动调整参数，试听入门、基础、进阶、原始四档谱，下载 MIDI 或直接跟练。推理全程在本机运行，可随时取消。
+转写完成后，可用「自动节拍 + 全大键适配」估算 BPM、节拍原点和适合大键的移调量。「还原原调」将移调设回 0。你也可以手动调整参数，试听原节奏单音、细节版或工作旋律。细节版可选择自动配和声，三版均可下载 MIDI，可弹音域内的谱可直接跟练。推理全程在本机运行，可随时取消。
 
-进度面板显示音频准备、模型加载、已完成窗口和音符整理。「本机精扒」分别显示 UVR 分离和 GAME 转写。分离完成后即可试听双声道人声 WAV，重新打开该片段也能回听。钢琴整谱试听从第一个音符进入，短句对照和 MIDI 导出保留原有时间位置。
+进度面板显示音频准备、模型加载、已完成窗口和音符整理。「本机精扒」分别显示 UVR 分离和 GAME 转写。分离完成后即可试听双声道人声 WAV，重新打开该片段也能回听。新歌默认选「原节奏单音」。钢琴试听遇到孤立前奏音时会从首个连续乐句进入，可切换到「第一个音」核对，也可单独放慢试听速度。短句对照、跟练和 MIDI 使用谱面时间轴。
 
 也可以在「扒谱」中粘贴公开的 B 站或 YouTube 视频链接并点击「获取音频」。本地服务器会通过 yt-dlp + ffmpeg 下载并规范化音频，然后走与文件导入相同的流程——识别仍需手动点击开始。该功能需要联网、本地 `npm start` 服务，以及 yt-dlp 和 ffmpeg/ffprobe（安装方法见 [docs/url-import.md](docs/url-import.md)）。不使用 Cookie、登录，也不绕过 DRM 或访问控制——请仅下载你有权获取的内容。
 

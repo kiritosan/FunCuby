@@ -5,6 +5,7 @@ import {
     QUARTER_EPSILON,
     sameOnset,
 } from "../../core/teaching/epsilon.js";
+import { PracticeReview } from "../../core/teaching/practice-review.js";
 import { FollowPractice } from "../../core/teaching/follow-practice.js";
 import {
     DEFAULT_OD,
@@ -40,6 +41,9 @@ import {
 } from "./results-view.js";
 import { initTeachingScore } from "./score-view.js";
 import { createStage } from "./stage-view.js";
+import { createAudition, phrasePreviewIndex } from "../transcribe/audition.js";
+import { phraseRanges } from "../../core/transcription/phrase-ranges.js";
+import { buildBacking } from "./challenge-audio.js";
 
 const CALIBRATION_TAPS = 8;
 const CALIBRATION_INTERVAL_MS = 1100;
@@ -105,7 +109,38 @@ export function initTeachPage({
     const metronome = new TeachingMetronome(() =>
         pause(t("teach.status.metronomeSuspended")),
     );
-    const scoreView = initTeachingScore(notice, (note) => stage.peek(note));
+    let rangeTotal = 0,
+        rangeOutside = 0,
+        media = null,
+        songId = "",
+        weakBar = null,
+        backingNode = null,
+        launchGeneration = 0;
+    let demoGeneration = 0;
+    const rangePolicy = () => byId("teach-range-policy").value;
+    const piano = createAudition(
+        () => metronome.context,
+        () => {
+            byId("teach-demo").textContent = t(
+                piano.active ? "teach.work.stopDemo" : "teach.work.demo",
+            );
+        },
+    );
+    const scoreView = initTeachingScore(
+        notice,
+        (note) => stage.peek(note),
+        () => 60 + getOffset(),
+        (total, out) => {
+            rangeTotal = total;
+            rangeOutside = out;
+            byId("teach-range-tools").hidden = !out && rangePolicy() === "0";
+            byId("teach-range-report").textContent = t(
+                "teach.work.rangeCount",
+                { out, total },
+            );
+            if (phase === "idle") updateLaunch();
+        },
+    );
     const report = reportErrors((error) => notice(error, true));
 
     const active = () =>
@@ -142,7 +177,36 @@ export function initTeachPage({
 
     function discardResults() {
         hideResults();
+        weakBar = null;
+        scoreView.markMistakes([]);
         scoreView.resetHistory();
+    }
+
+    function updateLaunch() {
+        const blocked =
+            rangePolicy() === "skip"
+                ? rangeOutside === rangeTotal
+                : rangeOutside > 0 || !rangeTotal;
+        byId("teach-start").disabled =
+            phase !== "idle" ||
+            loading ||
+            !song ||
+            !selectedTracks().length ||
+            transport.state !== "ready" ||
+            player.state !== "idle" ||
+            blocked;
+        byId("teach-demo").disabled =
+            phase !== "idle" ||
+            loading ||
+            !song ||
+            !rangeTotal ||
+            player.state !== "idle";
+        byId("teach-challenge").disabled =
+            phase !== "idle" ||
+            loading ||
+            !song ||
+            !rangeTotal ||
+            player.state !== "idle";
     }
 
     function feedback(text, until = performance.now() + 800) {
@@ -171,14 +235,26 @@ export function initTeachPage({
         byId("teach-track-count").textContent = tracks.length
             ? t("teach.tracks.selected", { count: tracks.length })
             : t("teach.tracks.none");
-        byId("teach-start").disabled =
-            active() ||
-            phase === "paused" ||
-            loading ||
-            !song ||
-            !tracks.length ||
-            !ready ||
-            playing;
+        updateLaunch();
+        byId("teach-connect").hidden = ready;
+        byId("teach-connect").disabled = transport.state === "connecting";
+        byId("teach-range-policy").disabled = frozen;
+        byId("teach-start").textContent = t(
+            isFollowMode() ? "teach.work.follow" : "teach.work.rhythm",
+        );
+        byId("panel-teach").classList.toggle(
+            "practice-focus",
+            !!session && session.mode === "lesson",
+        );
+        byId("teach-assist").hidden = !(
+            session?.mode === "lesson" && ["paused", "waiting"].includes(phase)
+        );
+        byId("teach-hear-group").hidden = !session?.practice?.current;
+        byId("teach-backing-field").hidden = !media || isFollowMode();
+        byId("teach-backing").disabled = frozen;
+        byId("teach-backing-label").textContent = t(
+            media?.stem ? "teach.work.backing" : "teach.work.mix",
+        );
         byId("teach-pause").disabled =
             !["playing", "waiting", "paused"].includes(phase) ||
             !ready ||
@@ -222,6 +298,7 @@ export function initTeachPage({
                 pitch: 60 + offset,
             });
             stage.relabel(offset);
+            if (song) scoreView.selection();
         }
         stage.showHeld(heldPitches());
     }
@@ -239,11 +316,63 @@ export function initTeachPage({
         if (!hit) return;
         if (hit.id !== undefined) stage.removeRing(hit.id);
         if (animate) stage.flash(hit);
+        if (session?.judge) {
+            const phrase = session.review.judge(
+                hit,
+                session.notes[session.visualHead],
+            );
+            const chord = session.review.chordFeedback(hit);
+            const hint = session.review.timingHint(hit);
+            const feedbackItem = phrase ?? chord ?? hint;
+            if (feedbackItem) {
+                feedback(
+                    t("teach.work." + feedbackItem.key, feedbackItem.args),
+                );
+                return;
+            }
+        } else if (hit.grade === "Wrong" && session?.practice)
+            session.review.flag(session.practice.current?.notes[0]);
         feedback(
             HIT_FEEDBACK[hit.grade]
                 ? t(`teach.feedback.${HIT_FEEDBACK[hit.grade]}`)
-                : hit.grade,
+                : ["300", "100", "50"].includes(hit.grade)
+                  ? t(
+                        hit.grade === "300"
+                            ? "teach.work.onTime"
+                            : hit.errorMs < 0
+                              ? "teach.work.early"
+                              : "teach.work.late",
+                    )
+                  : hit.grade,
         );
+    }
+
+    function stopBacking() {
+        if (!backingNode) return;
+        backingNode.stop();
+        backingNode.disconnect();
+        backingNode = null;
+    }
+    function syncBacking() {
+        stopBacking();
+        if (!session?.backing || phase !== "playing") return;
+        const ctx = metronome.context;
+        const start = Math.max(0, session.pausedMs ?? 0);
+        const offset =
+            Math.max(start, performance.now() - session.origin) / 1000;
+        if (offset >= session.backing.duration) return;
+        const node = ctx.createBufferSource();
+        node.buffer = session.backing;
+        node.connect(ctx.destination);
+        node.start(
+            ctx.currentTime +
+                Math.max(
+                    0,
+                    (session.origin + offset * 1000 - performance.now()) / 1000,
+                ),
+            offset,
+        );
+        backingNode = node;
     }
 
     // ---- clock -------------------------------------------------------------------------------
@@ -271,7 +400,7 @@ export function initTeachPage({
             !active() ||
             phase === "waiting" ||
             session.practice?.waiting ||
-            !byId("teach-metronome").checked ||
+            (!byId("teach-metronome").checked && !session.challenge) ||
             !metronome.context;
         if (silent) return;
         metronome.start({
@@ -282,7 +411,10 @@ export function initTeachPage({
                 (skipCurrent ? 0.01 : 0),
             endMs: () =>
                 Math.min(
-                    session.endMs - (session.mode === "lesson" ? 0.01 : 0),
+                    session.challenge && !byId("teach-metronome").checked
+                        ? -0.01
+                        : session.endMs -
+                              (session.mode === "lesson" ? 0.01 : 0),
                     session.practice?.current?.timeMs ?? Infinity,
                 ),
         });
@@ -300,6 +432,7 @@ export function initTeachPage({
         if (result.waiting) {
             session.pausedMs = result.position;
             if (!wasWaiting) {
+                session.review.flag(session.practice.current.notes[0]);
                 phase = "waiting";
                 metronome.stop();
                 controls();
@@ -393,6 +526,14 @@ export function initTeachPage({
         });
         stage.drawFlashes(now);
         stage.drawUpcoming(upcoming);
+        const next = notes[session.visualHead];
+        if (next?.bar && next.bar !== session.currentBar) {
+            session.currentBar = next.bar;
+            byId("teach-phrase-position").textContent = t(
+                "teach.work.playBar",
+                { bar: next.bar },
+            );
+        }
         byId("teach-time").textContent =
             `${formatClock(raw)} / ${formatClock(session.endMs)}`;
         if (session.mode === "lesson")
@@ -441,7 +582,10 @@ export function initTeachPage({
     // ---- session lifecycle -------------------------------------------------------------------
 
     function endSession(clearFeedback = true) {
+        launchGeneration++;
         cancelFrame();
+        piano.stop();
+        stopBacking();
         metronome.stop();
         stage.clear(clearFeedback);
         session = null;
@@ -477,6 +621,7 @@ export function initTeachPage({
         score();
         controls();
         scheduleAudio();
+        syncBacking();
     }
 
     function recordFollowRound(stopped) {
@@ -489,7 +634,10 @@ export function initTeachPage({
 
     function finish(stopped) {
         if (session?.mode === "lesson") {
-            if (session.judge) session.judge.advance(Infinity);
+            if (session.judge)
+                session.judge
+                    .advance(stopped ? elapsed() - timingOffset : Infinity)
+                    .forEach((hit) => showHit(hit, false));
             score();
             const result = session.practice
                 ? recordFollowRound(stopped)
@@ -506,11 +654,24 @@ export function initTeachPage({
                     bpm: byId("teach-bpm").value,
                 }),
             });
-            if (!session.practice)
-                byId("teach-results").scrollIntoView({
-                    behavior: "smooth",
-                    block: "start",
-                });
+            const trouble = session.review.trouble;
+            let highest = 0;
+            weakBar = null;
+            for (const bar of trouble.keys()) {
+                const count = trouble.get(bar) + (trouble.get(bar + 1) ?? 0);
+                if (count > highest) {
+                    highest = count;
+                    weakBar = bar;
+                }
+            }
+            scoreView.markMistakes(session.review.quarters);
+            byId("teach-retry-weak").hidden = !weakBar;
+            byId("teach-review-target").textContent = weakBar
+                ? t("teach.work.weakBar", { bar: weakBar, count: highest })
+                : "";
+            byId("teach-personal-best").textContent = "";
+            if (!session.follow && !stopped && session.judge.complete)
+                recordBest(result);
             feedback(
                 t(
                     stopped
@@ -522,6 +683,43 @@ export function initTeachPage({
         }
         endSession(false);
         controls(t(stopped ? "teach.status.stopped" : "teach.status.finished"));
+        byId("teach-results").scrollIntoView({ block: "nearest" });
+    }
+
+    function recordBest(result) {
+        const plan = session.plan;
+        const key =
+            "teach:best:" +
+            JSON.stringify([
+                songId,
+                fileName,
+                selectedTracks(),
+                plan.startQuarter,
+                plan.endQuarter,
+                byId("teach-bpm").value,
+                session.od,
+                rangePolicy(),
+                60 + getOffset(),
+            ]);
+        let previous;
+        try {
+            previous = JSON.parse(preferences.get(key));
+        } catch {
+            /* unavailable record */
+        }
+        const best = Math.max(previous?.score ?? 0, result.score);
+        const { missed, partial, whole } = session.review.chordSummary();
+        if (!previous || result.score > previous.score)
+            preferences.set(key, JSON.stringify({ score: best, missed }));
+        byId("teach-personal-best").textContent =
+            t("teach.work.record", { best, missed, partial, whole }) +
+            (previous
+                ? " · " +
+                  t("teach.work.previous", {
+                      score: previous.score,
+                      missed: previous.missed,
+                  })
+                : "");
     }
 
     function completeFollowRound() {
@@ -576,6 +774,9 @@ export function initTeachPage({
     }
 
     function pause(status = t("teach.status.paused")) {
+        demoGeneration++;
+        piano.stop();
+        stopBacking();
         if (phase === "calibrating" || phase === "preparing") {
             stop();
             return;
@@ -622,7 +823,7 @@ export function initTeachPage({
         };
     }
 
-    function lessonChart() {
+    function lessonChart(requirePlayable = true) {
         if (!song) throw new AppError("errors.uploadFirst");
         scoreView.refresh(
             song,
@@ -632,6 +833,13 @@ export function initTeachPage({
         );
         const plan = scoreView.plan();
         if (!plan.notes.length) throw new AppError("errors.noPracticeNotes");
+        if (
+            requirePlayable &&
+            plan.notes.some(
+                (n) => n.note < 60 + getOffset() || n.note > 84 + getOffset(),
+            )
+        )
+            throw new AppError("teach.work.unplayable");
         return { notes: plan.notes, grid: plan.grid, plan };
     }
 
@@ -647,16 +855,33 @@ export function initTeachPage({
         const follow = !calibration && isFollowMode();
         const od = !calibration && !follow ? selectedDifficulty() : DEFAULT_OD;
         const chart = calibration ? calibrationChart() : lessonChart();
+        demoGeneration++;
+        piano.stop();
+        const shortGame =
+            !calibration && !follow && chart.plan.durationMs <= 30001;
+        const withBacking = shortGame && media && byId("teach-backing").checked;
+        let backing = null;
+        const generation = ++launchGeneration;
         mapping = false;
         phase = "preparing";
         controls();
         try {
-            if (byId("teach-metronome").checked) await metronome.ready();
+            if (byId("teach-metronome").checked || shortGame)
+                await metronome.ready();
+            if (withBacking)
+                backing = await buildBacking(
+                    metronome.context,
+                    media,
+                    chart.plan,
+                    Number(byId("teach-bpm").value) / media.bpm,
+                );
         } catch (error) {
+            if (generation !== launchGeneration) return;
             phase = "idle";
             controls();
             throw error;
         }
+        if (generation !== launchGeneration) return;
         if (
             phase !== "preparing" ||
             transport.state !== "ready" ||
@@ -674,7 +899,11 @@ export function initTeachPage({
             grid: chart.grid,
             leadMs,
             od,
-            origin: performance.now() + Math.max(COUNT_IN_MS, leadMs + 500),
+            origin:
+                performance.now() +
+                (shortGame
+                    ? chart.plan.countInMs
+                    : Math.max(COUNT_IN_MS, leadMs + 500)),
             pausedMs: 0,
             resumeAt: null,
             endMs:
@@ -686,6 +915,11 @@ export function initTeachPage({
             plan: chart.plan,
             loop: follow ? { ...chart.plan.loop, round: 1 } : null,
             follow,
+            challenge: shortGame,
+            backing,
+            review: calibration
+                ? null
+                : new PracticeReview(notes, chart.plan.durationMs),
         };
         phase = calibration ? "calibrating" : "playing";
         if (!calibration) {
@@ -699,10 +933,8 @@ export function initTeachPage({
         resetScore(notes.length);
         preferences.set("teach:lead", leadMs / 1000);
         if (!calibration) score();
-        byId("teach-keyboard")
-            .closest(".teach-stage")
-            ?.scrollIntoView({ behavior: "smooth", block: "start" });
         controls();
+        byId("panel-teach").scrollIntoView({ block: "start" });
         if (calibration) scheduleAudio();
         tick();
     }
@@ -713,7 +945,9 @@ export function initTeachPage({
             transport.state === "ready" && player.state === "idle";
         if (!canRun()) throw new AppError("errors.connectAndStop");
         const current = session;
-        if (byId("teach-metronome").checked) await metronome.ready();
+        piano.stop();
+        if (byId("teach-metronome").checked || session.challenge)
+            await metronome.ready();
         if (
             session !== current ||
             phase !== "paused" ||
@@ -726,6 +960,7 @@ export function initTeachPage({
         phase = "playing";
         controls();
         scheduleAudio();
+        syncBacking();
         tick();
     }
 
@@ -824,12 +1059,20 @@ export function initTeachPage({
 
     // ---- file and settings -------------------------------------------------------------------
 
-    async function loadFile(file) {
+    async function loadFile(file, sourceMedia = null) {
         if (locked()) {
             if (file === undefined) return null;
             throw new AppError("errors.teachingBusy");
         }
         const request = ++fileRequest;
+        demoGeneration++;
+        piano.stop();
+        media = null;
+        rangeTotal = rangeOutside = 0;
+        weakBar = null;
+        byId("teach-range-policy").value = "0";
+        byId("teach-range-tools").hidden = true;
+        byId("teach-phrase-position").textContent = "";
         file ??= byId("teach-file").files[0];
         if (!file) return null;
         loading = true;
@@ -843,7 +1086,15 @@ export function initTeachPage({
         hideResults();
         try {
             const parsed = await readMidiFile(file);
+            const hash = await crypto.subtle.digest(
+                "SHA-256",
+                await file.arrayBuffer(),
+            );
             if (request !== fileRequest) return null;
+            songId = Array.from(new Uint8Array(hash), (b) =>
+                b.toString(16).padStart(2, "0"),
+            ).join("");
+            media = sourceMedia;
             song = parsed;
             fileName = file.name;
             const first = renderTrackPicker(song.tracks);
@@ -855,6 +1106,12 @@ export function initTeachPage({
                 selectedTracks(),
                 Number(byId("teach-bpm").value),
             );
+            scoreView.markMistakes([]);
+            if (media?.opening)
+                scoreView.selectPhrase(
+                    media.opening.start,
+                    media.opening.end - media.opening.start,
+                );
             byId("teach-summary").textContent = t("teach.summary.loaded", {
                 file: fileName,
                 count: song.tracks.length,
@@ -881,11 +1138,11 @@ export function initTeachPage({
      * switches to follow mode and refreshes controls without starting a session.
      * Refuses while practising, calibrating, loading or playing so nothing is disturbed.
      */
-    async function loadPracticeFile(file) {
+    async function loadPracticeFile(file, sourceMedia = null) {
         if (!(file instanceof Blob)) throw new AppError("errors.uploadFirst");
         if (locked() || loading) throw new AppError("errors.teachingBusy");
         if (player.state !== "idle") throw new AppError("errors.stopPlayback");
-        const loaded = await loadFile(file);
+        const loaded = await loadFile(file, sourceMedia);
         if (!loaded) return false;
         byId("teach-mode").value = "follow";
         preferences.set("teach:mode", "follow");
@@ -918,12 +1175,129 @@ export function initTeachPage({
             preferences.get("teach:metronome") === "true";
         metronome.volume = Number(byId("teach-volume").value) / 100;
         byId("teach-mode").value =
-            preferences.get("teach:mode") === "follow" ? "follow" : "rhythm";
+            preferences.get("teach:mode") === "rhythm" ? "rhythm" : "follow";
         renderDifficultyPicker(savedNumber("teach:od", DEFAULT_OD, 0, 10));
     }
 
     restoreSettings();
     mappingChanged();
+
+    async function hear(notes, skipIntro = false) {
+        piano.stop();
+        const request = ++demoGeneration;
+        await metronome.ready();
+        if (request === demoGeneration && stillVisible())
+            await piano.play(notes, { skipIntro });
+    }
+    byId("teach-connect").addEventListener("click", () =>
+        byId("connect").click(),
+    );
+    byId("teach-choose-track").addEventListener("click", () => {
+        byId("teach-options").open = true;
+        byId("teach-tracks").querySelector("input:not(:disabled)")?.focus();
+    });
+    byId("teach-range-policy").addEventListener(
+        "change",
+        report(() => {
+            refreshChart();
+        }),
+    );
+    function refreshChart() {
+        if (!song || locked()) return;
+        demoGeneration++;
+        piano.stop();
+        scoreView.refresh(
+            song,
+            selectedTracks(),
+            number("teach-bpm", "bpm"),
+            true,
+        );
+        discardResults();
+        controls();
+    }
+    byId("teach-demo").addEventListener(
+        "click",
+        report(async () => {
+            if (piano.active) {
+                demoGeneration++;
+                piano.stop();
+                return;
+            }
+            const notes = lessonChart(false).notes,
+                index = phrasePreviewIndex(notes);
+            const first = notes[index].timeMs;
+            const range = phraseRanges(
+                notes,
+                notes.at(-1).timeMs + notes.at(-1).durationMs,
+            ).find((r) => r.start <= first && r.end >= first);
+            await hear(
+                notes.slice(index).filter((n) => n.timeMs < range.end),
+                true,
+            );
+        }),
+    );
+    byId("teach-hear-group").addEventListener(
+        "click",
+        report(async () => {
+            const group = session?.practice?.current;
+            if (group)
+                await hear(
+                    group.notes.map((n) => ({
+                        ...n,
+                        timeMs: 0,
+                        durationMs: 450,
+                    })),
+                );
+        }),
+    );
+    byId("teach-reselect").addEventListener("click", () => {
+        stop();
+        byId("teach-pick-a").focus();
+    });
+    byId("teach-slow").addEventListener(
+        "click",
+        report(async () => {
+            const bpm = number("teach-bpm", "bpm");
+            stop();
+            byId("teach-bpm").value = bpmValue(Math.max(1, bpm * 0.8));
+            refreshChart();
+            await begin();
+        }),
+    );
+    byId("teach-challenge").addEventListener(
+        "click",
+        report(async () => {
+            const plan = lessonChart(false).plan;
+            const at = plan.notes[phrasePreviewIndex(plan.notes)].timeMs;
+            scoreView.selectPhrase(plan.startMs + at, 20000);
+            byId("teach-mode").value = "rhythm";
+            discardResults();
+            controls();
+            if (!byId("teach-start").disabled) await begin();
+        }),
+    );
+    byId("teach-retry-weak").addEventListener(
+        "click",
+        report(async () => {
+            if (!weakBar) return;
+            scoreView.selectBars(weakBar, weakBar + 1);
+            byId("teach-mode").value = "follow";
+            controls();
+            if (!byId("teach-start").disabled) await begin();
+        }),
+    );
+    byId("teach-replay").addEventListener(
+        "click",
+        report(() => begin()),
+    );
+    byId("teach-original-speed").addEventListener(
+        "click",
+        report(async () => {
+            byId("teach-bpm").value = bpmValue(song.initialBpm);
+            refreshChart();
+            await begin();
+        }),
+    );
 
     byId("teach-file").addEventListener(
         "change",
@@ -975,14 +1349,7 @@ export function initTeachPage({
             "change",
             report(() => {
                 if (locked() || !song) return;
-                scoreView.refresh(
-                    song,
-                    selectedTracks(),
-                    number("teach-bpm", "bpm"),
-                    true,
-                );
-                discardResults();
-                controls();
+                refreshChart();
             }),
         );
     byId("teach-mode").addEventListener("change", () => {

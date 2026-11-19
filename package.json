@@ -16,6 +16,7 @@
     "build:transcription": "node scripts/build-transcription.mjs",
     "test": "node --test \"tests/unit/*.test.js\"",
     "test:e2e": "node tests/e2e/smoke.mjs",
+    "test:e2e:practice": "node tests/e2e/practice-challenge.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

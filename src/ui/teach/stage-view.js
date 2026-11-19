@@ -226,12 +226,26 @@ export function createStage(getOffset) {
         const signature = upcoming.map((note) => note.id).join(",");
         if (signature === upcomingSignature) return;
         upcomingSignature = signature;
+        const groups = [];
+        for (const note of upcoming) {
+            const previous = groups.at(-1);
+            if (
+                previous &&
+                previous[0].preview === note.preview &&
+                sameOnset(previous[0].timeMs, note.timeMs)
+            )
+                previous.push(note);
+            else groups.push([note]);
+        }
         byId("teach-upcoming").replaceChildren(
-            ...upcoming.map((note) => {
+            ...groups.map((group) => {
+                const note = group[0],
+                    names = group.map((n) => noteName(n.note)).join(" + ");
                 const span = el(
                     "span",
-                    `${note.preview ? "↻ " : ""}${noteName(note.note)}`,
+                    `${note.preview ? "↻ " : ""}${group.length > 1 ? "[" + names + "]" : names}`,
                 );
+                span.classList.toggle("chord-cue", group.length > 1);
                 span.style.setProperty("--cue-color", note.cueColor);
                 return span;
             }),

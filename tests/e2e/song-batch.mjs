@@ -10,6 +10,10 @@ import {
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createServer } from "../../server.js";
+import {
+    arrangeTranscription,
+    transcriptionMidi,
+} from "../../src/core/arrangement.js";
 import { openTestBrowser } from "./browser.mjs";
 
 const fixture = process.argv[2];
@@ -48,9 +52,21 @@ try {
     const { root } = await browser.send("DOM.getDocument");
     const { nodeId } = await browser.send("DOM.querySelector", {
         nodeId: root.nodeId,
-        selector: "#transcribe-batch-files",
+        selector: "#transcribe-file",
     });
     await browser.send("DOM.setFileInputFiles", { nodeId, files });
+    await browser.until(
+        '!document.getElementById("transcribe-batch-discard").hidden',
+    );
+    assert.equal(
+        await browser.evaluate(
+            'document.querySelectorAll("#transcribe-batch-list li").length',
+        ),
+        0,
+    );
+    await browser.evaluate(
+        'document.getElementById("transcribe-batch-add").click()',
+    );
     await browser.until(
         'document.querySelectorAll("#transcribe-batch-list [data-state=running]").length===2',
     );
@@ -90,13 +106,7 @@ try {
             "0-" + Math.round(capture.clipMs) + "ms",
             engine.replace(":", "-"),
         );
-        for (const name of [
-            "recognition",
-            "starter",
-            "melody",
-            "fuller",
-            "original",
-        ])
+        for (const name of ["recognition", "melody", "fuller", "original"])
             assert.equal(
                 (await readFile(join(midi, name + ".mid"))).toString(
                     "ascii",
@@ -120,6 +130,50 @@ try {
     );
     await browser.until(
         '!document.getElementById("transcribe-results").hidden && !!document.getElementById("transcribe-vocals-audio").src',
+    );
+    await browser.until(
+        'document.querySelector("#transcribe-editor [data-action=vocals]")?.disabled === false',
+    );
+    await browser.evaluate(`document.querySelector('.transcribe-level[data-level="fuller"]').click();
+        const choice=document.querySelector("#transcribe-harmony"); choice.value="auto"; choice.dispatchEvent(new Event("change"));`);
+    await browser.until(
+        'document.querySelector("#transcribe-storage-status").dataset.i18n === "transcribe.storage.saved"',
+    );
+    const saved = await (await fetch(base + "/api/library/" + id)).json();
+    assert.equal(saved.state.settings["transcribe-harmony"], "auto");
+    const [engine, capture] = saved.state.captures[0];
+    const fields = saved.state.settings;
+    const expected = arrangeTranscription(
+        capture.editedNotes ?? capture.notes,
+        {
+            level: "fuller",
+            autoHarmony: true,
+            bpm: Number(fields["transcribe-bpm"]),
+            originMs: Number(fields["transcribe-origin"]),
+            firstNote: saved.state.firstNote,
+            transpose: Number(fields["transcribe-transpose"]),
+        },
+    );
+    const path = join(
+        library,
+        id,
+        saved.meta.revision,
+        "0-" + Math.round(capture.clipMs) + "ms",
+        engine.replace(":", "-"),
+    );
+    assert.deepEqual(
+        await readFile(join(path, "fuller.mid")),
+        Buffer.from(
+            transcriptionMidi(expected.notes, {
+                name: saved.meta.name,
+                bpm: expected.bpm,
+            }),
+        ),
+    );
+    assert.ok(!(await readdir(path)).includes("starter.mid"));
+    await browser.send("Page.reload", { ignoreCache: true });
+    await browser.until(
+        'document.querySelector("#transcribe-harmony").value==="auto" && !document.querySelector("#transcribe-harmony-field").hidden && document.querySelector("#transcribe-editor [data-action=vocals]")?.disabled === false',
     );
     await browser.send("Emulation.setDeviceMetricsOverride", {
         width: 390,
@@ -148,6 +202,16 @@ try {
     console.log(
         "PASS: two simultaneous UVR + GAME songs, independent failure, source/WAV/MIDI on disk, restore after clearing site data, mobile layout",
     );
+} catch (error) {
+    if (browser)
+        console.error(
+            await browser
+                .evaluate(
+                    'Array.from(document.querySelectorAll("#transcribe-batch-list li"),row=>[row.dataset.state,row.textContent])',
+                )
+                .catch(() => []),
+        );
+    throw error;
 } finally {
     await browser?.close();
     server.closeAllConnections();

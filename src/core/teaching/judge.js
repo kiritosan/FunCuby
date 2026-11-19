@@ -60,6 +60,7 @@ export class TeachingJudge {
         this.weight = 0;
         this.counts = { 300: 0, 100: 0, 50: 0, Miss: 0 };
         this.errors = [];
+        this.chordAnchor = null;
         this.errorSum = 0;
         this.comboScore = 0;
         this.maxComboScore = 0;
@@ -115,13 +116,28 @@ export class TeachingJudge {
         }
         // Keyboard lanes consume the earliest unjudged occurrence of the same pitch.
         const candidate = queue?.notes[queue.head];
-        if (!candidate) {
+        if (
+            !candidate ||
+            Math.abs(timeMs - candidate.timeMs) > this.windows.miss
+        ) {
             this.wrong++;
+            this.combo = 0;
             return { note, grade: "Wrong", errorMs: null };
         }
-        const errorMs = timeMs - candidate.timeMs,
-            distance = Math.abs(errorMs);
-        if (distance > this.windows.miss) return null;
+        const errorMs = timeMs - candidate.timeMs;
+        let distance = Math.abs(errorMs);
+        // Allow a rolled dyad within 45 ms to share the first key's timing.
+        if (
+            this.chordAnchor?.onset === candidate.timeMs &&
+            timeMs >= this.chordAnchor.press &&
+            timeMs - this.chordAnchor.press <= 45
+        )
+            distance = Math.min(
+                distance,
+                Math.abs(this.chordAnchor.press - candidate.timeMs),
+            );
+        else if (distance <= this.windows.meh)
+            this.chordAnchor = { onset: candidate.timeMs, press: timeMs };
         return this.grade(
             candidate,
             distance <= this.windows.great
@@ -154,7 +170,11 @@ export class TeachingJudge {
         );
         return {
             score: Math.max(0, Math.min(1000000, score)),
-            rank: this.complete ? osuRank(this.counts) : null,
+            rank: this.complete
+                ? this.wrong && this.counts[300] === this.notes.length
+                    ? "S"
+                    : osuRank(this.counts)
+                : null,
             accuracy: accuracy * 100,
             maxCombo: this.maxCombo,
             combo: this.combo,

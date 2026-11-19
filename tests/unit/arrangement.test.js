@@ -67,36 +67,26 @@ test("arrangeTranscription never mutates the captured transcription", () => {
     assert.deepEqual(input, snapshot);
 });
 
-test("grid snapping and BPM caps scale each level", () => {
-    const input = [note(72, 560, 900)];
-    const expected = {
-        starter: 72,
-        melody: 96,
-        fuller: 112,
-        original: 120,
-    };
-    for (const level of LEVELS) {
-        const result = arrange(input, { level, bpm: 120 });
-        assert.equal(result.sourceBpm, 120);
-        assert.equal(result.bpm, expected[level]);
-        assert.equal(result.notes.length, 1);
-    }
-    // The original level is a passthrough: exact source times and pitches.
-    const original = arrange(input, { level: "original", bpm: 120 });
-    assert.equal(original.notes[0].timeMs, 560);
-    assert.equal(original.notes[0].durationMs, 900);
-    assert.equal(original.notes[0].note, 72);
-    // Starter snaps to a quarter-note grid at the capped 72 BPM: 560 ms rounds
-    // down to the 500 ms grid line, then stretches by 120/72.
-    const starter = arrange(input, { level: "starter", bpm: 120 });
-    assert.ok(Math.abs(starter.notes[0].timeMs - (500 * 120) / 72) < 0.01);
-    assert.ok(Math.abs(starter.notes[0].durationMs - (1000 * 120) / 72) < 0.01);
-    // Melody keeps an eighth-note grid at 96 BPM.
-    const melody = arrange(input, { level: "melody", bpm: 120 });
-    assert.ok(Math.abs(melody.notes[0].timeMs - (500 * 120) / 96) < 0.01);
-    // Fuller keeps a sixteenth-note grid at 112 BPM.
-    const fuller = arrange(input, { level: "fuller", bpm: 120 });
-    assert.ok(Math.abs(fuller.notes[0].timeMs - (500 * 120) / 112) < 0.5);
+test("starter selects beat anchors without flattening timing, melody keeps offbeats", () => {
+    const input = [
+        note(60, 90, 250),
+        note(64, 465, 190),
+        note(67, 642, 85),
+        note(69, 1090, 330),
+    ];
+    for (const level of LEVELS)
+        assert.equal(arrange(input, { level }).bpm, 120);
+    const timing = (notes) => notes.map((n) => [n.timeMs, n.durationMs]);
+    assert.deepEqual(timing(arrange(input, { level: "starter" }).notes), [
+        [90, 250],
+        [465, 190],
+        [1090, 330],
+    ]);
+    assert.deepEqual(
+        timing(arrange(input, { level: "melody" }).notes),
+        timing(input).map(([t, d], i) => [t, i === 1 ? 177 : d]),
+    );
+    assert.equal(arrange(input, { level: "fuller" }).notes[0].timeMs, 125);
 });
 
 test("starter keeps only main keys relative to firstNote, all in the 25-key range", () => {
@@ -208,11 +198,11 @@ test("short notes are omitted only according to each level's minimum", () => {
         const result = arrange(input, { level });
         counts[level] = result.notes.length;
     }
-    assert.equal(counts.starter, 0); // needs >= 250 ms
-    assert.equal(counts.melody, 0); // needs >= 125 ms
+    assert.equal(counts.starter, 0); // needs >= 175 ms
+    assert.equal(counts.melody, 1); // preserves short articulated notes
     assert.equal(counts.fuller, 1); // needs >= 62.5 ms
     assert.equal(counts.original, 1); // unfiltered
-    assert.equal(arrange(input, { level: "melody" }).stats.filtered, 1);
+    assert.equal(arrange(input, { level: "melody" }).stats.filtered, 0);
 });
 
 test("polyphony caps hold at every timestamp, including sustained overlap", () => {
@@ -249,6 +239,53 @@ test("polyphony caps hold at every timestamp, including sustained overlap", () =
     assert.equal(duo.notes.length, 2);
     // Sustained notes are clipped at the next attack, so overlap stays within cap.
     assert.ok(maxSimultaneous(duo.notes) <= 2);
+});
+
+test("detail reports played dyads and keeps separate attacks from becoming a chord", () => {
+    const chord = arrange([note(60, 0), note(64, 0)], { level: "fuller" });
+    assert.equal(chord.stats.dyads, 1);
+    const sequential = arrange([note(60, 70, 70), note(64, 156, 80)], {
+        level: "fuller",
+    });
+    assert.equal(sequential.stats.dyads, 0);
+    assert.equal(
+        new Set(sequential.notes.map((n) => n.timeMs)).size,
+        sequential.notes.length,
+    );
+});
+
+test("optional harmony adds a playable lower voice while preserving existing attacks and dyads", () => {
+    const input = [
+        note(72, 0, 500),
+        note(76, 0, 500),
+        note(74, 1000, 500),
+        note(76, 2000, 500),
+        note(79, 3000, 500),
+    ];
+    const plain = arrange(input, { level: "fuller" });
+    const duet = arrange(input, { level: "fuller", autoHarmony: true });
+    assert.ok(duet.stats.generatedHarmony > 0);
+    assert.equal(
+        duet.stats.dyads,
+        plain.stats.dyads + duet.stats.generatedHarmony,
+    );
+    for (const n of plain.notes)
+        assert.ok(
+            duet.notes.some(
+                (v) =>
+                    v.note === n.note &&
+                    v.timeMs === n.timeMs &&
+                    v.durationMs === n.durationMs,
+            ),
+        );
+    assert.equal(duet.notes.filter((n) => n.timeMs === 0).length, 2);
+    assert.ok(maxSimultaneous(duet.notes) <= 2);
+    assert.ok(duet.notes.every((n) => n.note >= 60 && n.note <= 84));
+    for (const level of ["melody", "original"])
+        assert.deepEqual(
+            arrange(input, { level }),
+            arrange(input, { level, autoHarmony: true }),
+        );
 });
 
 test("octave-folded duplicate chord tones are deduplicated", () => {
@@ -334,12 +371,9 @@ test("beat origin offset accepts 600000 ms, drops earlier notes, shifts later on
         bpm: 120,
         originMs: 150_000,
     });
-    // The pre-offset note is filtered; the later note snaps to the melody
-    // grid relative to the offset, then scales by the 120/96 tempo cap.
     assert.equal(shifted.stats.filtered, 1);
     assert.equal(shifted.notes.length, 1);
-    const expected = (Math.round(50_000 / 250) * 250 * 120) / 96;
-    assert.ok(Math.abs(shifted.notes[0].timeMs - expected) < 1);
+    assert.equal(shifted.notes[0].timeMs, 50_000);
     // Boundary values: 600000 accepted, 600001 rejected.
     assert.doesNotThrow(() =>
         arrange([note(72, 700_000, 500)], { originMs: 600_000 }),

@@ -81,9 +81,19 @@ velocity. **Auto Tempo + Main-Key Fit** reapplies the estimates to the current
 working melody. If tempo confidence is low, the current BPM and beat origin
 are kept. **Original Key** resets the transpose to zero and keeps the
 current rhythm settings. The BPM, beat origin, transpose and pitch bounds are
-editable. The simplified levels use the beat grid and pocket keyboard range.
-In dense polyphony, they trace a lead line before choosing beat anchors and
-folding octaves. The starter level uses the 15 main keys.
+editable. The single-line melody keeps the timing of the selected attacks.
+Detailed uses a sixteenth-note grid and keeps existing two-note attacks.
+Its optional auto-harmony adds a softer lower chord tone to selected single
+attacks, using the arranged key and the surrounding melody. Its counter shows
+how many dyads include a generated note. Both playable versions fit the pocket
+keyboard range and use the source tempo. The working
+melody is available separately with its original pitches and timing.
+
+The full-score preview can bypass one or two isolated opening attacks when
+at least four seconds of silence lead into three attacks spaced no more than
+1.5 seconds apart. Chords count as one attack. **First note** includes the
+opening again. The preview speed and start controls apply only to full-score
+listening. Phrase comparisons, MIDI export and practice use the score timing.
 
 New files and video links replace the active song after decoding succeeds.
 The Node server keeps a separate folder per song under `.funcuby-library/` (override with `FUNCUBY_LIBRARY_DIR`). The page shows the current folder. Each source is written once. `song.json` identifies the active snapshot containing `draft.json` and MIDI files grouped by clip and mode. UVR WAVs are saved as soon as they arrive. New edits publish a complete replacement snapshot. Revision checks reject stale edits from another tab.
@@ -190,8 +200,9 @@ rhythm settings, and that the result and settings survived a reload.
 The [local benchmark](melody-evaluation.md) uses independent vocal annotations
 and a known piano score. Lead and backing vocals can still be confused, and choirs,
 instrumental interludes and octave errors remain important failure cases. Tempo
-may be interpreted at half or double speed. Starter quantization and main-key
-selection can omit short notes or chromatic notes.
+may be interpreted at half or double speed. Automatically arranged harmony is
+one possible accompaniment. Checking the original chords requires listening
+to the backing track.
 
 Reproduce the short UI acceptance runs against a running local server:
 

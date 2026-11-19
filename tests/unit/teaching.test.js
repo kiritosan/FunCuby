@@ -6,6 +6,8 @@ import {
     TeachingJudge,
 } from "../../src/core/teaching/judge.js";
 import { FollowPractice } from "../../src/core/teaching/follow-practice.js";
+import { PracticeReview } from "../../src/core/teaching/practice-review.js";
+import { fitBacking } from "../../src/ui/teach/challenge-audio.js";
 import {
     calibrationOffset,
     colorTeachingNotes,
@@ -19,6 +21,60 @@ const notes = () => [
     { id: 0, note: 60, timeMs: 1000 },
     { id: 1, note: 62, timeMs: 2000 },
 ];
+
+test("a rolled chord shares the first key's timing within 45 ms", () => {
+    const chord = [60, 64].map((note) => ({ note, timeMs: 1000 }));
+    for (const [delay, grade] of [
+        [30, "300"],
+        [60, "50"],
+    ]) {
+        const judge = new TeachingJudge(chord, { od: 10 });
+        judge.press(60, 1000);
+        assert.equal(judge.press(64, 1000 + delay).grade, grade);
+    }
+});
+
+test("review marks the affected onsets and distinguishes partial and missed chords", () => {
+    const chart = [60, 64, 65, 69].map((note, id) => ({
+        id,
+        note,
+        timeMs: Math.floor(id / 2) * 500,
+        quarter: Math.floor(id / 2),
+        bar: 1,
+        durationMs: 200,
+    }));
+    const review = new PracticeReview(chart, 1000);
+    const judge = new TeachingJudge(chart);
+    const first = judge.press(60, 0);
+    review.judge(first);
+    assert.deepEqual(review.chordFeedback(first), {
+        key: "partial",
+        args: { done: 1, total: 2 },
+    });
+    for (const missed of judge.advance(Infinity)) {
+        review.judge(missed);
+        review.chordFeedback(missed);
+    }
+    assert.deepEqual(Array.from(review.quarters), [0, 1]);
+    assert.deepEqual(review.chordSummary(), {
+        partial: 1,
+        whole: 1,
+        missed: 2,
+    });
+});
+
+test("slower backing retains its transposed pitch across the longer clip", () => {
+    const rate = 24000;
+    const input = Float32Array.from({ length: rate }, (_, i) =>
+        Math.sin((2 * Math.PI * 220 * i) / rate),
+    );
+    const output = fitBacking(input, 0.8, 5, 30000);
+    assert.equal(output.length, 30000);
+    let crossings = 0;
+    for (let i = 6001; i <= 18000; i++)
+        if (output[i - 1] <= 0 && output[i] > 0) crossings++;
+    assert.ok(Math.abs(crossings * 2 - 220 * 2 ** (5 / 12)) < 5);
+});
 
 test("osuHitWindows follows lazer formulas", () => {
     assert.deepEqual(osuHitWindows(5), {
@@ -149,4 +205,16 @@ test("teachingBeats walks the 3/4 grid and scales with BPM", () => {
         accent: true,
         beat: 1,
     });
+});
+test("an extra key breaks the combo and excludes SS even with perfect note timing", () => {
+    const judge = new TeachingJudge([
+        { note: 60, timeMs: 1000 },
+        { note: 64, timeMs: 1500 },
+    ]);
+    judge.press(60, 1000);
+    judge.press(67, 1200);
+    assert.equal(judge.result.combo, 0);
+    judge.press(64, 1500);
+    assert.equal(judge.result.accuracy, 100);
+    assert.equal(judge.result.rank, "S");
 });

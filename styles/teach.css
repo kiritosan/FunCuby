@@ -653,3 +653,42 @@
         grid-template-columns: minmax(0, 1fr);
     }
 }
+.teach-work-actions,
+#teach-range-tools,
+#teach-assist {
+    margin-block: 0.65rem;
+}
+#teach-options > summary {
+    cursor: pointer;
+    padding: 0.6rem 0;
+}
+#teach-options[open] > summary {
+    margin-bottom: 0.4rem;
+}
+#teach-range-report,
+#teach-review-target {
+    font-weight: 600;
+}
+.score-note.outside-range {
+    text-decoration: line-through;
+    opacity: 0.6;
+}
+.review-beat {
+    box-shadow: inset 0 -3px var(--grade-miss);
+}
+#panel-teach.practice-focus #teach-options,
+#panel-teach.practice-focus .teach-score-card,
+#panel-teach.practice-focus .teach-grid > aside,
+#panel-teach.practice-focus .teach-work-actions,
+#panel-teach.practice-focus #teach-range-tools,
+#panel-teach.practice-focus #teach-upload,
+#panel-teach.practice-focus #teach-start {
+    display: none;
+}
+#panel-teach.practice-focus .teach-grid {
+    grid-template-columns: 1fr;
+}
+.teach-upcoming .chord-cue {
+    font-weight: 700;
+    border-bottom: 2px solid var(--cue-color);
+}

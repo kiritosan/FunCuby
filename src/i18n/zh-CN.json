@@ -353,6 +353,44 @@
     }
   },
   "teach": {
+    "work": {
+      "settings": "音轨、速度与判定设置",
+      "demo": "听这句示范",
+      "stopDemo": "停止示范",
+      "challenge": "20 秒短挑战",
+      "follow": "开始跟练",
+      "rhythm": "开始挑战",
+      "backing": "播放伴奏（减弱人声，限 30 秒选段）",
+      "mix": "播放原曲（限 30 秒选段）",
+      "range": "音域处理",
+      "asWritten": "原谱音高",
+      "up": "升一个八度",
+      "down": "降一个八度",
+      "skip": "只练可弹音",
+      "rangeCount": "选区 {total} 音，其中 {out} 音超出键盘范围",
+      "unplayable": "选区含超出键盘范围的音，请调整八度、音轨或选择「只练可弹音」。",
+      "playBar": "第 {bar} 小节",
+      "hearGroup": "听这一组",
+      "slow": "八成速重练",
+      "reselect": "重新选句",
+      "retryWeak": "跟练易错两小节",
+      "replay": "再来一次",
+      "originalSpeed": "原速再来",
+      "weakBar": "从第 {bar} 小节开始重练，附近有 {count} 次等待、误触或节奏偏差。",
+      "progress": "已判定 {done}/{total} 音",
+      "onTime": "正好",
+      "early": "偏早",
+      "late": "偏晚",
+      "partial": "和声已按 {done}/{total}",
+      "chordDone": "和声合上了",
+      "chordEarly": "和声偏早",
+      "chordLate": "和声偏晚",
+      "waitBeat": "连续偏早，下一拍稍等一点",
+      "anticipate": "连续偏晚，下一拍稍提前",
+      "phraseClear": "这一句弹稳了",
+      "record": "本机最佳 {best} 分 · 和声少按 {partial} 组，整组漏弹 {whole} 组",
+      "previous": "此前最佳 {score} 分，漏弹 {missed} 组"
+    },
     "summary": {
       "empty": "上传 MIDI，勾选一条或多条音轨开始练习",
       "loaded": "{file} · {count} 条音轨 · 原曲 {bpm} BPM",
@@ -518,10 +556,26 @@
       "noHits": "本次没有命中的音符。",
       "early": "命中音符平均偏早 {error} ms（已应用校准）。",
       "late": "命中音符平均偏晚 {error} ms（已应用校准）。",
-      "stoppedMisses": "提前结束，未完成的音符计为 Miss。"
+      "stoppedMisses": "本次未完成，仅统计已判定的音。"
     }
   },
   "transcribe": {
+    "workspace": {
+      "work": "当前歌曲",
+      "library": "曲库与批量",
+      "source": "音源与转写",
+      "editSource": "音源设置",
+      "changeFile": "更换文件",
+      "drop": "选择或拖入一首歌",
+      "limits": "本机处理 · 最长 10 分钟 · 最大 50 MB",
+      "link": "从 B 站或 YouTube 链接导入",
+      "range": "转写范围",
+      "runClip": "转写选定片段",
+      "startBatch": "开始解析所选 {count} 首",
+      "discard": "清除文件选择",
+      "queue": "已完成 {done}/{total} 首",
+      "failed": "{count} 首需要处理"
+    },
     "title": "音频转扒谱练习",
     "intro": "导入音频文件或 B 站 / YouTube 链接，生成可试听、导出和跟练的口袋琴谱。转写在本机运行。",
     "chooseAudio": "选择音频文件",
@@ -533,8 +587,8 @@
       "empty": "暂无本机保存的歌曲",
       "unsaved": "当前音频尚未保存；上次成功保存的内容仍保留",
       "saving": "正在保存到本机，请稍候再刷新…",
-      "saved": "已保存到本机，刷新或下次打开可继续",
-      "restored": "已恢复本机音频和已完成的转写，无需重新获取或识别",
+      "saved": "已保存到本机",
+      "restored": "已从磁盘恢复",
       "unavailable": "读写磁盘曲库失败，请检查本地服务和磁盘空间。当前编辑可导出 MIDI 备份。",
       "conflict": "其他页面已替换或删除保存内容；本页不再自动覆盖。重新导入可保存本页歌曲。",
       "clearing": "正在删除本机保存…",
@@ -552,21 +606,17 @@
     "cancel": "取消",
     "levels": "改编版本",
     "level": {
-      "starter": {
-        "name": "入门主键骨干",
-        "desc": "四分音符网格，同时最多一个音，速度较慢，省略小按键"
-      },
       "melody": {
-        "name": "基础单音",
-        "desc": "八分音符网格，同时最多一个音"
+        "name": "原节奏单音",
+        "desc": "想听出原曲或跟着哼时用。每次弹一个音，保留旋律的快慢和停顿。"
       },
       "fuller": {
-        "name": "进阶双音",
-        "desc": "十六分音符网格，同时最多两个音"
+        "name": "细节版",
+        "desc": "熟悉旋律后练双音。可沿用谱中已有的双音，也可给单音配上较轻的低声部。"
       },
       "original": {
         "name": "工作旋律（未适配）",
-        "desc": "保留当前音符和人工修订，不做网格与音区适配"
+        "desc": "核对识别或人工改谱时用。保留工作稿的音高、时间和修订，可能超出口袋琴音域。"
       }
     },
     "origin": "节拍原点偏移（毫秒）",
@@ -577,7 +627,7 @@
     "advanced": "高级：音高过滤",
     "minPitch": "最低 MIDI 音高",
     "maxPitch": "最高 MIDI 音高",
-    "stats": "识别 {source} 音 · 输出 {output} · 过滤 {filtered} · 节奏精简 {reduced} · 省略小键 {omitted} · 八度归位 {octave}（整体移调 {shift}）· 超出 25 键 {out} · 速度 {bpm} BPM（按 {assumption} BPM 假设）",
+    "stats": "来源 {source} 音 · 成谱 {output} 音 · 过滤 {filtered} · 节奏精简 {reduced} · 八度归位 {octave}（整体移调 {shift}）· 超出 25 键 {out} · 速度 {bpm} BPM",
     "outOfRange": "有 {count} 个音超出 25 键音域——只能试听或下载，跟练已禁用。",
     "preview": "音符预览",
     "previewHint": "固定 1=C 编号，并非识别出的调。完整节奏谱请在练习页查看。",
@@ -628,6 +678,15 @@
     "auditionArranged": "当前难度改编",
     "auditionOriginal": "工作旋律 · 原调原速",
     "auditionVolume": "钢琴音量",
+    "harmony": "细节版和声",
+    "harmonyOff": "仅保留谱中双音",
+    "harmonyAuto": "自动配和声",
+    "generatedHarmony": "其中 {count} 处为自动编配",
+    "previewStart": "试听起点",
+    "previewPhrase": "首个连续乐句",
+    "previewFirst": "第一个音",
+    "previewSpeed": "试听速度",
+    "dyadCount": "{count} 处双音",
     "auditionStop": "停止",
     "download": "下载 MIDI",
     "downloadOriginal": "下载工作旋律 MIDI",
@@ -642,6 +701,7 @@
       "piano": "钢琴草稿",
       "compare": "依次试听",
       "vocalHint": "对同一片段运行「本机精扒」即可加入分离人声。",
+      "vocalMissing": "这段谱已保存，曲库里缺少对应的人声 WAV。可在转写设置中对同一片段重新运行「本机精扒」以补存人声。",
       "vocalReadError": "无法读取这段分离人声，请重新运行本机精扒。",
       "stop": "停止短句",
       "previous": "上一短句",
@@ -781,7 +841,7 @@
     "arrangeSettings": "调整节拍、移调与编配",
     "compareWorking": "试听工作旋律（未简化）",
     "reviewCues": "有 {count} 处收音疑点 · 跳到试听位置",
-    "version": "{song} · {name} · {count} 音 · {bpm} BPM",
+    "version": "{name} · {count} 音 · {bpm} BPM",
     "playVersion": "试听{name}",
     "method": {
       "basic-pitch": "Basic Pitch 在浏览器内识别音符，简化时会从候选声部中追踪主旋律。",
